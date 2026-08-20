@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editeur PDF local</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="dot"></span> Editeur PDF <em>local</em></div>
+  <div class="file-name" id="fileName">Aucun document</div>
+  <div class="bar-actions">
+    <label class="btn ghost" for="picker">Ouvrir</label>
+    <input type="file" id="picker" accept="application/pdf" hidden>
+    <button class="btn ghost" id="undoBtn" disabled>Annuler</button>
+    <button class="btn primary" id="exportBtn" disabled>Telecharger</button>
+  </div>
+</header>
+
+<div id="drop" class="drop">
+  <div class="drop-card">
+    <h1>Deposez un PDF</h1>
+    <p>Documents natifs et <strong>scans</strong>. Sur un scan, la police, la couleur de l'encre
+       et le grain du papier sont mesures puis reproduits.</p>
+    <label class="btn primary big" for="picker2">Choisir un fichier</label>
+    <input type="file" id="picker2" accept="application/pdf" hidden>
+    <p class="fine">Tout le traitement reste sur votre machine.</p>
+  </div>
+</div>
+
+<main id="app" hidden>
+  <aside class="pages" id="pageList"></aside>
+
+  <section class="stage" id="stage">
+    <div class="toolbar" id="toolbar">
+      <button class="tool on" data-tool="select" title="Selectionner et modifier le texte">Texte</button>
+      <button class="tool" data-tool="erase" title="Effacer une zone">Gomme</button>
+      <button class="tool" data-tool="add" title="Ajouter un bloc de texte">Ajouter</button>
+      <button class="tool" data-tool="image" title="Inserer une image ou une signature">Image</button>
+      <span class="sep"></span>
+      <button class="tool" id="zoomOut">-</button>
+      <span class="zoom" id="zoomLabel">100%</span>
+      <button class="tool" id="zoomIn">+</button>
+      <span class="sep"></span>
+      <label class="chk"><input type="checkbox" id="showBoxes" checked> Reperes</label>
+      <span class="sep"></span>
+      <button class="tool" id="ocrBtn" title="Relire la page dans l'autre mode (OCR ou texte natif)">Relire</button>
+    </div>
+    <div class="canvas-wrap" id="canvasWrap">
+      <div class="canvas" id="canvas">
+        <img id="pageImg" alt="page">
+        <div class="overlay" id="overlay"></div>
+        <div class="marquee" id="marquee" hidden></div>
+      </div>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <aside class="inspector" id="inspector">
+    <div class="empty" id="inspectorEmpty">
+      <h3>Aucune selection</h3>
+      <p>Cliquez sur un texte de la page pour le modifier.</p>
+    </div>
+    <div id="editor" hidden>
+      <div class="field">
+        <label>Texte</label>
+        <textarea id="txt" rows="3" spellcheck="false"></textarea>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Police</label><select id="fontSel"></select></div>
+        <div class="field"><label>Corps</label><input type="number" id="sizeIn" step="0.5" min="3" max="200"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>Encre</label><input type="color" id="colorIn"></div>
+        <div class="field"><label>Style</label>
+          <div class="segmented">
+            <button id="boldBtn" title="Gras"><b>G</b></button>
+            <button id="italBtn" title="Italique"><i>I</i></button>
+          </div>
+        </div>
+        <div class="field"><label>Aligne</label>
+          <div class="segmented">
+            <button data-align="left" class="on">&#8676;</button>
+            <button data-align="center">&#8596;</button>
+            <button data-align="right">&#8677;</button>
+          </div>
+        </div>
+      </div>
+      <div class="detected" id="detected"></div>
+      <div class="row-actions">
+        <button class="btn primary" id="applyBtn">Appliquer</button>
+        <button class="btn ghost" id="cancelBtn">Annuler</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<div class="veil" id="veil" hidden><div class="spinner"></div><span id="veilText">Analyse...</span></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
