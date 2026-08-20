@@ -204,7 +204,8 @@ class Doc:
         items = []
         for i, ln in enumerate(lines):
             m = raster.measure_line(
-                img, ln["bbox"], ln["text"], line_slope_deg=ln.get("slope_deg", 0.0)
+                img, ln["bbox"], ln["text"],
+                line_slope_deg=ln.get("slope_deg", 0.0), words=ln.get("words"),
             )
             x0, y0, x1, y1 = ln["bbox"]
             items.append(
@@ -220,6 +221,8 @@ class Doc:
                     "pdf_font": "",
                     "font_key": m["font_key"],
                     "font_score": m["font_score"],
+                    "blur": round(m.get("blur", 0.0) * k, 4),
+                    "grain": round(m.get("grain", 0.0), 2),
                     "size": round(m["size_px"] * k, 2),
                     "tracking": round(m["tracking"] * k, 3),
                     "color": hex_color(m["ink"]),
@@ -404,6 +407,10 @@ class Doc:
         tracking_pt = float(op.get("tracking", base.get("tracking", 0.0)) or 0.0)
         align = op.get("align") or base.get("align") or "left"
         paper = parse_hex(op.get("paper") or base.get("paper", "#ffffff"), (255, 255, 255))
+        blur_pt = float(op.get("blur", base.get("blur", 0.0)) or 0.0)
+        grain = float(op.get("grain", base.get("grain", 0.0)) or 0.0)
+        # Graine stable : l'apercu et le fichier exporte doivent montrer le meme grain.
+        seed = (abs(hash((op.get("item_id", ""), text, round(bbox.x0, 1)))) % 100000) + 1
 
         ink_left = float(base.get("ink_left", bbox.x0))
         ink_top = float(base.get("ink_top", bbox.y0))
@@ -417,7 +424,7 @@ class Doc:
                 bbox.x0 - PATCH_MARGIN_PT, bbox.y0 - PATCH_MARGIN_PT,
                 bbox.x1 + PATCH_MARGIN_PT, bbox.y1 + PATCH_MARGIN_PT,
             )
-            raster.erase(img, to_px(erase_rect), paper=paper, pad=1)
+            raster.erase(img, to_px(erase_rect), paper=paper, pad=1, seed=seed)
             if not text.strip():
                 return
             size_px = size_pt * scale
@@ -427,6 +434,7 @@ class Doc:
                 x=(ink_left - clip.x0) * scale, baseline=baseline,
                 align=align, box_right=(bbox.x1 - clip.x0) * scale,
                 tracking=tracking_pt * scale,
+                blur=blur_pt * scale, grain=grain, seed=seed,
             )
 
         # Le texte saisi est souvent plus long que celui qu'il remplace : la zone

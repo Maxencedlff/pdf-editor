@@ -61,7 +61,12 @@ utilisee : tout est deduit de l'image.
    de l'encre est prise au coeur du trait (apres erosion, pour ne pas la delaver avec
    l'anti-aliasing) ; celle du papier sur une bande elargie autour du texte. Le texte
    clair sur fond sombre est gere.
-3. **Police** : chaque police installee redessine le meme texte, a la taille observee et
+3. **Police** : la comparaison porte sur quelques **mots isoles**, jamais sur la ligne
+   entiere. Sur soixante caracteres, un ecart d'espacement minime decale la fin du trace
+   et fait s'effondrer le recouvrement de toutes les polices a la fois : le classement ne
+   veut alors plus rien dire, et c'est ainsi qu'un corps de texte sans empattements
+   ressortait en serif. Sur des mots dont l'OCR donne la position exacte, il n'y a pas de
+   derive a rattraper. Chaque police installee redessine ces mots, a la taille observee et
    avec le flou mesure sur le scan, puis est comparee au document (IoU des masques
    d'encre + proximite de chasse). La mieux notee gagne. Trois details comptent :
    - le **flou du scan** est mesure et applique aux candidats. Sans cela, l'empatement du
@@ -82,9 +87,19 @@ utilisee : tout est deduit de l'image.
 4. **Corps et espacement** : la taille vient de la hauteur d'encre (elle ne depend pas de
    la chasse, donc reste juste meme si la police devinee n'est pas exacte), puis un
    leger interlettrage rattrape la largeur pour que le texte reoccupe la meme place.
-5. **Effacement** : par *inpainting* (OpenCV TELEA) et non par un rectangle blanc, ce qui
+   Cet interlettrage est plafonne a 6 % du corps et ne touche pas les espaces : resserrer
+   les mots entre eux se remarque bien plus qu'une ligne un peu plus courte.
+5. **Texture** : le texte redessine n'est pas pose net, il subit la meme chaine que le
+   document d'origine. C'est le point qui trahit le plus une retouche, avant meme la
+   forme des lettres. Un scan n'est pas flou, il est **aliase** : ses transitions
+   encre/papier tiennent en un pixel, la ou le rendu d'une police les etale en un degrade
+   regulier. On mesure donc la raideur reelle des contours et on l'applique au trace,
+   avec les irregularites d'encrage et le bruit du capteur. Meme raison pour la zone
+   effacee : l'inpainting rend une surface lisse, a laquelle on redonne le grain du
+   papier voisin, sinon la platitude se repere aussitot.
+6. **Effacement** : par *inpainting* (OpenCV TELEA) et non par un rectangle blanc, ce qui
    preserve le grain, le jaunissement et le fond colore.
-6. **Reincrustation** : seule la zone modifiee est reinseree, **a la resolution native du
+7. **Reincrustation** : seule la zone modifiee est reinseree, **a la resolution native du
    scan**. Le reste de la page n'est ni decode ni reencode : pas de perte de qualite, et
    le fichier ne gonfle pas. Une couche de texte invisible est ajoutee pour que la
    retouche reste cherchable.

@@ -263,6 +263,8 @@ async function applyEdit() {
     op = {
       type: "text", item_id: base.id, bbox: base.bbox, paper: base.paper,
       tracking: base.tracking || 0,
+      // Texture du scan : le texte redessine doit subir le meme flou et le meme grain.
+      blur: base.blur || 0, grain: base.grain || 0,
       left: base.ink_left ?? base.left ?? base.bbox[0],
       top: base.ink_top, baseline: base.baseline,
       font_key_changed: $("fontSel").value !== base.font_key,

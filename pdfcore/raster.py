@@ -105,8 +105,46 @@ def sample_colors(img: np.ndarray, box: Box) -> dict:
     }
 
 
+def font_samples(img: np.ndarray, words: list[dict] | None, limit: int = 3) -> list[tuple]:
+    """Choisit quelques mots isoles sur lesquels reconnaitre la police.
+
+    Les mots longs et purement alphabetiques sont les plus parlants : ils portent les
+    empattements et les jambages qui separent deux familles, sans les espaces dont la
+    largeur varie d'une police a l'autre.
+    """
+    if not words:
+        return []
+    scored = []
+    for w in words:
+        t = (w.get("text") or "").strip(" .,:;()[]\"'")
+        if len(t) < 4:
+            continue
+        letters = sum(c.isalpha() for c in t)
+        if letters < len(t) * 0.7:
+            continue
+        scored.append((letters, t, w["bbox"]))
+    scored.sort(key=lambda r: -r[0])
+
+    out = []
+    h, w_img = img.shape[:2]
+    for _, t, bbox in scored[:limit]:
+        x0, y0, x1, y1 = clamp_box(bbox, w_img, h, pad=1)
+        crop = img[y0:y1, x0:x1]
+        if crop.size == 0 or crop.shape[0] < 5:
+            continue
+        mask, _ = ink_mask(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY))
+        if mask.any():
+            out.append((mask, t))
+    return out
+
+
 def measure_line(
-    img: np.ndarray, box: Box, text: str, detect_font: bool = True, line_slope_deg: float = 0.0
+    img: np.ndarray,
+    box: Box,
+    text: str,
+    detect_font: bool = True,
+    line_slope_deg: float = 0.0,
+    words: list[dict] | None = None,
 ) -> dict:
     """Analyse complete d'une ligne scannee : couleurs, police, corps, baseline."""
     h, w = img.shape[:2]
@@ -124,8 +162,10 @@ def measure_line(
         sigma = blur_sigma(gray_crop, mask)
         far = ~cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
         noise = float(gray_crop[far].std()) if far.sum() > 30 else 99.0
+        grain = min(noise, 24.0)
+        samples = font_samples(img, words) or [(mask, text)]
         entry, score = fonts.identify(
-            mask, text, line_slope_deg=line_slope_deg, blur=sigma, noise=noise
+            samples, line_slope_deg=line_slope_deg, blur=sigma, noise=noise
         )
 
     # Corps : on cherche la taille qui reproduit la largeur d'encre mesuree.
@@ -152,6 +192,7 @@ def measure_line(
         "font_key": entry.key,
         "font_score": round(score, 3),
         "blur": round(sigma, 2),
+        "grain": round(grain if detect_font and mask is not None and mask.any() else 0.0, 2),
         "bold": entry.bold,
         "italic": entry.italic,
         "size_px": round(size, 2),
@@ -171,7 +212,30 @@ def baseline_from_ink(entry: FontEntry, text: str, size_px: float, ink_top: floa
     return ink_top + (ascent - top_rel)
 
 
-def erase(img: np.ndarray, box: Box, paper=None, pad: int = 2) -> np.ndarray:
+def _regrain(crop: np.ndarray, zone: np.ndarray, amount: float, seed: int) -> None:
+    """Redonne du grain a une zone reconstruite, sur place.
+
+    L'inpainting rend une surface lisse ; a cote du papier numerise, qui grouille de
+    micro-variations, cette platitude se repere immediatement.
+    """
+    if amount < 0.6 or not zone.any():
+        return
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(0.0, amount, size=(int(zone.sum()), 1))
+    vals = crop[zone].astype(np.float32) + noise
+    crop[zone] = np.clip(vals, 0, 255).astype(np.uint8)
+
+
+def paper_grain(crop: np.ndarray, mask: np.ndarray) -> float:
+    """Amplitude du grain du papier autour du texte."""
+    far = ~cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
+    if far.sum() < 30:
+        return 0.0
+    g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    return float(min(g[far].std(), 24.0))
+
+
+def erase(img: np.ndarray, box: Box, paper=None, pad: int = 2, seed: int = 0) -> np.ndarray:
     """Efface une zone en preservant le grain du papier (inpainting), sur place."""
     h, w = img.shape[:2]
     x0, y0, x1, y1 = clamp_box(box, w, h, pad=pad)
@@ -212,31 +276,72 @@ def draw_text(
     align: str = "left",
     box_right: float | None = None,
     tracking: float = 0.0,
+    blur: float = 0.0,
+    grain: float = 0.0,
+    seed: int = 0,
 ) -> np.ndarray:
-    """Dessine du texte a la baseline donnee, avec anti-aliasing, sur place."""
+    """Dessine du texte a la baseline donnee, sur place.
+
+    Le texte n'est pas pose net : on lui fait subir la meme chaine que le document
+    d'origine (irregularites d'encrage, flou optique du scanner, bruit du capteur).
+    Sans cela, un trace parfaitement lisse et regulier au milieu d'un texte numerise
+    saute aux yeux, meme quand la police, le corps et la couleur sont justes.
+    """
     if not text:
         return img
-    pil = Image.fromarray(img)
-    d = ImageDraw.Draw(pil)
+    h, w = img.shape[:2]
+    layer = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(layer)
     f = fonts.load(entry.path, max(4, int(round(size_px))))
 
-    fill = tuple(int(c) for c in color)
     lsb = f.getbbox(text)[0] if text else 0
-    width = f.getlength(text) + tracking * max(0, len(text) - 1)
+    width = f.getlength(text) + tracking * fonts.tracking_slots(text)
     ox = x - lsb
     if align in ("center", "right") and box_right is not None:
         span = box_right - x
         ox = x - lsb + (span - width) * (0.5 if align == "center" else 1.0)
 
     if abs(tracking) < 0.05:
-        d.text((ox, baseline), text, font=f, fill=fill, anchor="ls")
+        d.text((ox, baseline), text, font=f, fill=255, anchor="ls")
     else:
         # Pas d'espacement natif dans PIL : on avance glyphe par glyphe.
         cx = ox
-        for ch in text:
-            d.text((cx, baseline), ch, font=f, fill=fill, anchor="ls")
-            cx += f.getlength(ch) + tracking
-    np.copyto(img, np.asarray(pil))
+        for i, ch in enumerate(text):
+            d.text((cx, baseline), ch, font=f, fill=255, anchor="ls")
+            nxt = text[i + 1] if i + 1 < len(text) else " "
+            cx += f.getlength(ch) + (0.0 if ch.isspace() or nxt.isspace() else tracking)
+
+    alpha = np.asarray(layer).astype(np.float32) / 255.0
+    if not alpha.any():
+        return img
+
+    zone = cv2.dilate((alpha > 0.02).astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2) > 0
+    rng = np.random.default_rng(seed or 1)
+
+    # Irregularites d'encrage, appliquees avant le durcissement : combinees a lui, elles
+    # donnent les bords legerement dechiquetes d'un caractere imprime puis numerise.
+    alpha[zone] += rng.normal(0.0, 0.10 + grain / 255.0 * 2.0, size=int(zone.sum())).astype(np.float32)
+
+    if blur > 0.6:
+        alpha = cv2.GaussianBlur(alpha, (0, 0), float(blur))
+    else:
+        # Un scan n'est pas flou, il est aliase : ses transitions encre/papier tiennent en
+        # un pixel, la ou le rendu d'une police les etale en un degrade regulier. C'est
+        # cet ecart de nettete, plus que la forme des lettres, qui trahit une retouche.
+        k = float(np.clip(0.75 / max(blur, 0.12), 1.0, 7.0))
+        alpha = (alpha - 0.5) * k + 0.5
+    np.clip(alpha, 0.0, 1.0, out=alpha)
+
+    a = alpha[..., None]
+    ink = np.array([float(c) for c in color], dtype=np.float32)
+    out = img.astype(np.float32) * (1.0 - a) + ink * a
+
+    if grain > 0.6:
+        # Bruit du capteur, applique seulement la ou l'on vient de dessiner : le papier
+        # alentour a deja le sien.
+        out[zone] += rng.normal(0.0, grain * 0.7, size=(int(zone.sum()), 1)).astype(np.float32)
+
+    np.copyto(img, np.clip(out, 0, 255).astype(np.uint8))
     return img
 
 

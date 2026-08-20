@@ -171,16 +171,27 @@ def fit_size_by_height(entry: FontEntry, text: str, target_h: float, hint: float
     return target_h / r if r > 0.05 else hint
 
 
+def tracking_slots(text: str) -> int:
+    """Nombre d'intervalles ou l'interlettrage s'applique.
+
+    Les espaces en sont exclus : les resserrer collerait les mots entre eux, ce qui se
+    remarque bien plus qu'une largeur totale approximative.
+    """
+    t = text or ""
+    return sum(1 for a, b in zip(t, t[1:]) if not a.isspace() and not b.isspace())
+
+
 def tracking_for(entry: FontEntry, text: str, size: float, target_w: float) -> float:
     """Espacement additionnel par caractere pour retomber sur la largeur d'origine."""
     t = text or ""
-    n = len(t) - 1
+    n = tracking_slots(t)
     if n < 1 or target_w <= 1:
         return 0.0
     natural = ink_width(entry, t, size)
-    delta = (target_w - natural) / n
-    limit = size * 0.12
-    return float(np.clip(delta, -limit, limit))
+    # Correction volontairement discrete : au-dela, le texte parait comprime ou etire,
+    # defaut plus visible qu'un leger ecart de longueur de ligne.
+    limit = size * 0.06
+    return float(np.clip((target_w - natural) / n, -limit, limit))
 
 
 def ink_bbox(mask: np.ndarray):
@@ -356,8 +367,7 @@ def _looks_bold(ref: np.ndarray, text: str, blur: float) -> bool | None:
 
 
 def identify(
-    ink_mask: np.ndarray,
-    text: str,
+    samples: list[tuple[np.ndarray, str]],
     candidates: list[FontEntry] | None = None,
     line_slope_deg: float = 0.0,
     blur: float = 0.0,
@@ -365,29 +375,32 @@ def identify(
 ):
     """Devine la police d'un texte scanne.
 
-    ink_mask : masque binaire du texte tel qu'il apparait dans le scan.
-    text     : ce que l'OCR a lu, pour redessiner les memes glyphes.
+    `samples` est une liste de (masque d'encre, texte lu) portant chacun sur quelques mots.
+    On ne compare jamais une ligne entiere : sur soixante caracteres, un ecart d'espacement
+    minime decale la fin du trace et fait s'effondrer le recouvrement de toutes les
+    polices a la fois, si bien que le classement ne veut plus rien dire. Sur des mots
+    isoles, dont l'OCR donne la position exacte, il n'y a pas de derive a rattraper.
+
     Retourne (FontEntry, score 0..1) ; un score bas signale un resultat peu fiable.
     """
-    text = (text or "").strip()
-    ref = _crop_ink(ink_mask)
-    if ref is None or len(text) < 2:
+    prepared = []
+    for mask, text in samples:
+        text = (text or "").strip()
+        ref = _crop_ink(mask) if mask is not None else None
+        if ref is None or len(text) < 2 or ref.shape[0] < 5:
+            continue
+        prepared.append((ref, text[:40], max(1.0, 24.0 / ref.shape[0])))
+    if not prepared:
         return resolve(None), 0.0
 
-    sample = text[:70]
-    ref_h = ref.shape[0]
-    # Sous ~24 px de haut, la rasterisation domine les differences entre polices :
-    # on agrandit les deux cotes du meme facteur pour comparer sur assez de matiere.
-    boost = max(1.0, 24.0 / ref_h)
-    ref_up = _upscale(ref, boost)
-
     pool = candidates if candidates is not None else CATALOG
-    # Un scan bave et epaissi passe volontiers pour de l'italique gras aux yeux d'une
-    # comparaison de formes. On mesure donc l'inclinaison, en retirant la pente de la
-    # ligne elle-meme : sur une photo de document prise de travers, la page entiere
-    # penche sans que le texte soit italique pour autant.
-    if candidates is None and len(text) >= 6 and ref_h >= 12:
-        residual = abs(estimate_slant(ref) - line_slope_deg)
+    ref0, text0, boost0 = prepared[0]
+    if candidates is None and len(text0) >= 5 and ref0.shape[0] >= 12:
+        # Un scan bave et epaissi passe volontiers pour de l'italique gras aux yeux d'une
+        # comparaison de formes. On mesure donc l'inclinaison, en retirant la pente de la
+        # ligne elle-meme : sur une photo de document prise de travers, la page entiere
+        # penche sans que le texte soit italique pour autant.
+        residual = abs(estimate_slant(ref0) - line_slope_deg)
         # Filtre asymetrique : "droit" est une conclusion sure, "penche" ne l'est pas
         # (il reste une rotation residuelle possible), donc on n'impose rien dans ce cas.
         if residual < 4.0:
@@ -395,34 +408,37 @@ def identify(
             if subset:
                 pool = subset
 
-        # La graisse se mesure aussi, au lieu d'etre deduite de la comparaison globale :
-        # un gras est simplement plus large, donc il gagnait des qu'une police etroite
-        # etait en jeu, meme face a un texte manifestement fin.
         # Sur un texte petit ou une image bruitee, l'ecart d'epaisseur entre un maigre et
         # un gras se compte en fractions de pixel : la mesure n'y veut plus rien dire.
-        want_bold = _looks_bold(ref, sample, blur) if (ref_h >= 20 and noise < 2.0) else None
+        want_bold = _looks_bold(ref0, text0, blur) if (ref0.shape[0] >= 20 and noise < 2.0) else None
         if want_bold is not None:
             subset = [f for f in pool if f.bold == want_bold]
             if subset:
                 pool = subset
+
     best, best_score = resolve(None), -1.0
     for entry in pool:
-        try:
-            # Rendu a la taille reellement observee : le candidat subit alors les memes
-            # pertes de rasterisation que le scan, sinon un trait net passe pour maigre
-            # face a un trait bruite qui parait gras.
-            size = ref_h / max(0.05, ink_height_ratio(entry, sample))
-            cand = _crop_ink(render_mask(entry, sample, int(round(np.clip(size, 6, 300))), blur=blur))
-        except OSError:
-            continue
-        if cand is None:
-            continue
-        cand_up = _upscale(cand, boost)
-        if cand_up.shape[0] != ref_up.shape[0]:
-            cand_up = _upscale(cand_up, ref_up.shape[0] / cand_up.shape[0])
-        score = W_SHAPE * _shape_iou(ref_up, cand_up) + W_ASPECT * _aspect_score(
-            ref_up.shape[1], cand_up.shape[1]
-        )
-        if score > best_score:
-            best, best_score = entry, score
+        total, weight = 0.0, 0.0
+        for ref, text, boost in prepared:
+            try:
+                # Rendu a la taille reellement observee : le candidat subit alors les memes
+                # pertes de rasterisation que le scan, sinon un trait net passe pour maigre
+                # face a un trait bruite qui parait gras.
+                size = ref.shape[0] / max(0.05, ink_height_ratio(entry, text))
+                cand = _crop_ink(render_mask(entry, text, int(round(np.clip(size, 6, 300))), blur=blur))
+            except OSError:
+                continue
+            if cand is None:
+                continue
+            ref_up = _upscale(ref, boost)
+            cand_up = _upscale(cand, boost)
+            if cand_up.shape[0] != ref_up.shape[0]:
+                cand_up = _upscale(cand_up, ref_up.shape[0] / cand_up.shape[0])
+            score = W_SHAPE * _shape_iou(ref_up, cand_up) + W_ASPECT * _aspect_score(
+                ref_up.shape[1], cand_up.shape[1]
+            )
+            total += score * len(text)
+            weight += len(text)
+        if weight and total / weight > best_score:
+            best, best_score = entry, total / weight
     return best, max(0.0, best_score)
