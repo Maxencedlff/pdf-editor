@@ -6,10 +6,22 @@ en reproduisant la police, la couleur de l'encre et le grain du papier d'origine
 
 ## Lancer
 
+Depuis Windows, double-cliquer **Editeur PDF.cmd** sur le Bureau : le serveur demarre dans
+WSL s'il ne tourne pas deja, puis l'application s'ouvre dans une fenetre Chrome dediee.
+`Arreter Editeur PDF.cmd` arrete le serveur (rarement necessaire, il ne consomme rien au
+repos et ne redemarre pas tout seul apres extinction du PC).
+
+Depuis un terminal :
+
 ```bash
 ./run.sh            # puis ouvrir http://localhost:8420
 ./run.sh 9000       # sur un autre port
 ```
+
+Le raccourci `Editeur PDF.lnk` (avec l'icone) est genere par `installer_raccourci.ps1`. Windows
+Defender refuse qu'un script depose un `.lnk` pointant vers un `.cmd` sur le Bureau : il faut
+donc le glisser soi-meme depuis l'Explorateur, ou se contenter du `.cmd`, qui fonctionne aussi
+bien mais porte l'icone generique des fichiers de commande.
 
 ## Ce qu'elle sait faire
 
