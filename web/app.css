@@ -1,0 +1,235 @@
+:root{
+  --bg:#0e1014; --panel:#161a21; --panel-2:#1c222b; --line:#252c37;
+  --ink:#e8ecf2; --muted:#8b96a8; --accent:#4c8dff; --accent-soft:#4c8dff22;
+  --ok:#3ec98a; --warn:#f0a24b; --danger:#ff5f56;
+  /* Marges de securite : encoche, appareil photo, barre d'accueil. Elles valent zero
+     partout ailleurs, la meme feuille sert donc au bureau comme au telephone. */
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px);
+  --safe-r:env(safe-area-inset-right,0px);
+  --bar-h:52px; --dock-h:56px;
+}
+*{box-sizing:border-box}
+/* Les regles de mise en page ci-dessous (display:grid/flex) l'emportent sur le style par
+   defaut de [hidden] : sans ce rappel, un element masque resterait cliquable. */
+[hidden]{display:none!important}
+html{height:100%}
+body{
+  margin:0;min-height:100%;background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  /* Jamais overflow:hidden sur body : sur iOS cela laisse apparaitre un rectangle clair
+     dans la zone de securite. */
+  overflow-x:hidden;
+  -webkit-text-size-adjust:100%;
+  overscroll-behavior:none;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{-webkit-tap-highlight-color:transparent}
+
+/* ---------- barre superieure ---------- */
+.bar{
+  position:fixed;top:0;left:0;right:0;z-index:30;
+  height:calc(var(--bar-h) + var(--safe-t));
+  padding:var(--safe-t) calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l));
+  display:flex;align-items:center;gap:10px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+.brand{font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.file-name{flex:1;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-actions{display:flex;gap:8px;align-items:center;margin-left:auto}
+
+.btn{border:1px solid var(--line);background:var(--panel-2);padding:9px 15px;border-radius:9px;
+  cursor:pointer;transition:.15s;white-space:nowrap;min-height:40px}
+.btn:hover:not(:disabled){border-color:#3a4557;background:#212936}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.btn.big{padding:13px 24px;font-size:16px}
+.btn.compact{padding:8px 12px;font-size:14px}
+.icon-btn{background:none;border:none;color:var(--muted);padding:8px;cursor:pointer;
+  display:flex;align-items:center;min-width:40px;min-height:40px}
+.icon-btn:hover{color:var(--ink)}
+
+/* ---------- accueil ---------- */
+.drop{
+  position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);
+  padding:calc(var(--bar-h) + var(--safe-t) + 16px) calc(16px + var(--safe-r))
+          calc(16px + var(--safe-b)) calc(16px + var(--safe-l));
+}
+.drop.hot .drop-card{border-color:var(--accent);background:var(--accent-soft)}
+.drop-card{width:min(560px,100%);text-align:center;padding:36px 24px;border:1.5px dashed var(--line);
+  border-radius:18px;transition:.2s}
+.hero-icon{margin-bottom:14px}
+.drop-card h1{margin:0 0 10px;font-size:24px;font-weight:600}
+.drop-card p{color:var(--muted);margin:0 0 20px;font-size:14.5px}
+.drop-card .fine{font-size:13px;margin:16px 0 0}
+
+/* ---------- structure ---------- */
+main{
+  padding-top:calc(var(--bar-h) + var(--safe-t));
+  min-height:100vh;min-height:100dvh;
+  display:grid;grid-template-columns:1fr;
+}
+.stage{display:flex;flex-direction:column;min-width:0;background:#0a0c10}
+.canvas-wrap{
+  flex:1;overflow:auto;-webkit-overflow-scrolling:touch;
+  padding:14px calc(14px + var(--safe-r)) calc(var(--dock-h) + var(--safe-b) + 20px) calc(14px + var(--safe-l));
+  display:flex;justify-content:center;align-items:flex-start;
+}
+.canvas{position:relative;box-shadow:0 10px 40px #000a;background:#fff;flex:none;max-width:100%}
+.canvas canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0}
+.hit{position:absolute;border:1px solid transparent;border-radius:2px;cursor:text;
+  transition:.1s;min-height:14px}
+.overlay.show .hit{border-color:#4c8dff40;background:#4c8dff0d}
+.hit:active,.hit:hover{border-color:var(--accent)!important;background:#4c8dff22!important}
+.hit.on{border-color:var(--accent)!important;background:#4c8dff2e!important}
+.hit.low::after{content:"";position:absolute;right:-3px;top:-3px;width:7px;height:7px;
+  border-radius:50%;background:var(--warn)}
+.hit.edited{border-color:var(--ok)!important;background:#3ec98a1f!important}
+.canvas.tool-erase,.canvas.tool-add,.canvas.tool-image{cursor:crosshair;touch-action:none}
+.canvas.tool-erase .hit,.canvas.tool-add .hit,.canvas.tool-image .hit{pointer-events:none}
+.marquee{position:absolute;border:1.5px solid var(--accent);background:var(--accent-soft);pointer-events:none}
+.status{
+  padding:8px calc(14px + var(--safe-r)) 8px calc(14px + var(--safe-l));
+  border-top:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:12.5px;
+  position:fixed;left:0;right:0;bottom:calc(var(--dock-h) + var(--safe-b));z-index:15;
+}
+
+/* ---------- barre d'outils ---------- */
+.dock{
+  position:fixed;left:0;right:0;bottom:0;z-index:25;
+  height:calc(var(--dock-h) + var(--safe-b));
+  padding:0 calc(8px + var(--safe-r)) var(--safe-b) calc(8px + var(--safe-l));
+  display:flex;align-items:center;gap:5px;overflow-x:auto;scrollbar-width:none;
+  background:var(--panel);border-top:1px solid var(--line);
+}
+.dock::-webkit-scrollbar{display:none}
+.tool{border:1px solid var(--line);background:transparent;padding:9px 13px;border-radius:9px;
+  cursor:pointer;color:var(--muted);transition:.15s;white-space:nowrap;min-height:40px;flex:none}
+.tool.on{background:var(--accent-soft);border-color:var(--accent);color:#cfe0ff}
+.dock-sep{width:1px;height:22px;background:var(--line);flex:none;margin:0 3px}
+.zoom{color:var(--muted);min-width:46px;text-align:center;font-variant-numeric:tabular-nums;
+  font-size:13px;flex:none}
+
+/* ---------- miniatures ---------- */
+.pages{
+  position:fixed;top:calc(var(--bar-h) + var(--safe-t));bottom:calc(var(--dock-h) + var(--safe-b));
+  left:0;z-index:28;width:132px;padding:12px 10px calc(12px + var(--safe-b)) calc(10px + var(--safe-l));
+  background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;
+  transform:translateX(-100%);transition:transform .22s ease;
+}
+.pages.open{transform:none;box-shadow:12px 0 40px #0008}
+.thumb{position:relative;margin-bottom:12px;border:2px solid transparent;border-radius:6px;
+  overflow:hidden;cursor:pointer;background:#fff}
+.thumb canvas,.thumb img{display:block;width:100%}
+.thumb.on{border-color:var(--accent)}
+.thumb .num{position:absolute;left:5px;bottom:5px;background:#000b;padding:1px 7px;
+  border-radius:5px;font-size:11px;color:#fff}
+.thumb .pg-tools{position:absolute;top:4px;right:4px;display:flex;gap:3px}
+.pg-tools button{border:none;background:#000b;color:#fff;width:26px;height:26px;border-radius:6px;
+  cursor:pointer;font-size:13px;line-height:1}
+
+/* ---------- inspecteur / feuille du bas ---------- */
+.inspector{
+  position:fixed;left:0;right:0;bottom:0;z-index:35;
+  max-height:min(86dvh,560px);overflow-y:auto;
+  padding:6px calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) calc(16px + var(--safe-l));
+  background:var(--panel);border-top:1px solid var(--line);
+  border-radius:16px 16px 0 0;box-shadow:0 -12px 40px #0009;
+  transform:translateY(102%);transition:transform .24s ease;
+}
+.inspector.open{transform:none}
+.sheet-grip{width:40px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 12px}
+.empty{color:var(--muted);text-align:center;padding:18px 12px}
+.empty h3{color:var(--ink);font-size:15px;margin:0 0 6px;font-weight:600}
+.empty p{margin:0;font-size:13.5px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--muted);margin-bottom:5px}
+textarea,select,input[type=number]{width:100%;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:9px;padding:10px;outline:none;resize:vertical;font-size:16px}
+textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+input[type=color]{width:100%;height:42px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:9px;padding:3px;cursor:pointer}
+.grid2{display:grid;grid-template-columns:1fr 96px;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.segmented{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.segmented button{flex:1;background:var(--panel-2);border:none;padding:11px 0;cursor:pointer;
+  color:var(--muted);min-height:42px}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button.on{background:var(--accent);color:#fff}
+.detected{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;
+  font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.6}
+.detected b{color:var(--ink);font-weight:500}
+.tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;margin-left:4px}
+.tag.good{background:#3ec98a26;color:var(--ok)} .tag.mid{background:#f0a24b26;color:var(--warn)}
+/* Actions collees au bas de la feuille : en paysage sur telephone, la hauteur utile
+   tombe sous 400 px et le bouton principal se retrouverait sous la barre d'accueil. */
+.row-actions{display:flex;gap:8px;position:sticky;bottom:0;background:var(--panel);
+  padding:10px 0 2px;margin-top:2px}
+.row-actions .btn{flex:1;text-align:center}
+
+/* ---------- divers ---------- */
+.toast{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(var(--dock-h) + var(--safe-b) + 52px);
+  background:var(--panel-2);border:1px solid var(--line);padding:11px 18px;border-radius:10px;
+  z-index:60;box-shadow:0 10px 30px #000a;max-width:calc(100vw - 32px);text-align:center;font-size:14px}
+.toast.err{border-color:var(--danger);color:#ffc9c6}
+.veil{position:fixed;inset:0;background:#0b0d11e0;display:flex;flex-direction:column;gap:14px;
+  align-items:center;justify-content:center;z-index:50;color:var(--muted);padding:24px;text-align:center}
+.spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress{width:min(280px,80vw);height:5px;background:var(--line);border-radius:3px;overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+
+/* ---------- telephone en paysage ---------- */
+/* Sous 520 px de haut, une feuille venant du bas recouvrirait tout le document : elle
+   passe a droite, en panneau, pour qu'on voie ce que l'on modifie. */
+@media (max-height:520px) and (orientation:landscape){
+  .inspector{
+    top:calc(var(--bar-h) + var(--safe-t));bottom:0;left:auto;
+    width:min(360px,52vw);max-height:none;border-radius:0;
+    border-top:none;border-left:1px solid var(--line);
+    transform:translateX(102%);
+  }
+  .inspector.open{transform:none}
+  .sheet-grip{display:none}
+  .canvas-wrap{padding-bottom:calc(var(--dock-h) + var(--safe-b) + 12px)}
+  .empty{padding:20px 12px}
+  .field{margin-bottom:9px}
+  textarea{min-height:52px}
+}
+
+/* ---------- grand ecran : trois colonnes ---------- */
+@media (min-width:1000px){
+  main{grid-template-columns:132px 1fr 320px}
+  .pages{position:sticky;top:0;height:calc(100vh - var(--bar-h) - var(--safe-t));
+    transform:none;grid-column:1;width:auto;bottom:auto}
+  .stage{grid-column:2}
+  .inspector{position:sticky;top:0;grid-column:3;transform:none;border-radius:0;
+    border-top:none;border-left:1px solid var(--line);box-shadow:none;
+    height:calc(100vh - var(--bar-h) - var(--safe-t));max-height:none;
+    padding-bottom:calc(var(--dock-h) + 24px)}
+  .sheet-grip{display:none}
+  .empty{padding:44px 12px}
+  #pagesBtn{display:none!important}
+  .canvas-wrap{padding-bottom:calc(var(--dock-h) + 30px)}
+  .status{left:132px;right:320px}
+  .dock{padding-left:calc(140px + var(--safe-l))}
+}
+@media (max-width:999px){
+  .brand-rest{display:none}
+  .status{font-size:12px;padding-top:6px;padding-bottom:6px}
+  /* Une zone tactile ne descend pas sous 40 px, et l'overlay doit rester atteignable
+     meme sur une ligne de texte de quelques points. */
+  .hit{min-height:16px}
+}
+@media (max-width:600px){
+  .file-name{display:none}
+  .brand{font-size:15px}
+  .bar{gap:6px}
+  .btn.compact{padding:8px 10px;font-size:13.5px}
+}

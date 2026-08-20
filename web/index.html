@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover : la page occupe l'ecran jusque sous l'encoche, les marges de
+     securite etant ensuite rendues par env(safe-area-inset-*) dans la feuille de style. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1014">
+<meta name="description" content="Modifier un PDF, y compris scanne, sans rien envoyer sur Internet.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Editeur PDF</title>
+<link rel="icon" href="icone.svg">
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="bar" id="bar">
+  <button class="icon-btn" id="pagesBtn" title="Pages" hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 5h10v14H4zM16 8h4v11h-4z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+  </button>
+  <div class="brand"><span class="dot"></span> Editeur <span class="brand-rest">PDF</span></div>
+  <div class="file-name" id="fileName"></div>
+  <div class="bar-actions">
+    <button class="btn ghost compact" id="undoBtn" disabled title="Annuler">Annuler</button>
+    <button class="btn primary compact" id="exportBtn" disabled>Telecharger</button>
+  </div>
+</header>
+
+<div id="drop" class="drop">
+  <div class="drop-card">
+    <div class="hero-icon" aria-hidden="true">
+      <svg viewBox="0 0 64 64" width="56" height="56"><rect x="12" y="6" width="40" height="52" rx="4" fill="#f6f8fc"/><path d="M40 6v12h12" fill="#ced8e8"/><rect x="19" y="26" width="20" height="3" rx="1.5" fill="#b2bed0"/><rect x="19" y="34" width="26" height="3" rx="1.5" fill="#b2bed0"/><rect x="19" y="42" width="16" height="3" rx="1.5" fill="#4c8dff"/></svg>
+    </div>
+    <h1>Modifier un PDF</h1>
+    <p>Documents natifs et <strong>scans</strong>. Sur un scan, la police, la couleur de
+       l'encre et le grain du papier sont mesures puis reproduits.</p>
+    <label class="btn primary big" for="picker">Choisir un fichier</label>
+    <input type="file" id="picker" accept="application/pdf,.pdf" hidden>
+    <p class="fine">Tout se passe dans votre navigateur : le document n'est jamais envoye.</p>
+  </div>
+</div>
+
+<main id="app" hidden>
+  <aside class="pages" id="pageList"></aside>
+
+  <section class="stage">
+    <div class="canvas-wrap" id="canvasWrap">
+      <div class="canvas" id="canvas">
+        <canvas id="pageCanvas"></canvas>
+        <div class="overlay" id="overlay"></div>
+        <div class="marquee" id="marquee" hidden></div>
+      </div>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <aside class="inspector" id="inspector">
+    <div class="sheet-grip" id="sheetGrip" aria-hidden="true"></div>
+    <div class="empty" id="inspectorEmpty">
+      <h3>Aucune selection</h3>
+      <p>Touchez un texte de la page pour le modifier.</p>
+    </div>
+    <div id="editor" hidden>
+      <div class="field">
+        <label for="txt">Texte</label>
+        <textarea id="txt" rows="2" spellcheck="false" autocapitalize="off"></textarea>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="fontSel">Police</label><select id="fontSel"></select></div>
+        <div class="field"><label for="sizeIn">Corps</label><input type="number" id="sizeIn" step="0.5" min="3" max="200" inputmode="decimal"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label for="colorIn">Encre</label><input type="color" id="colorIn"></div>
+        <div class="field"><label>Style</label>
+          <div class="segmented">
+            <button id="boldBtn" type="button" title="Gras"><b>G</b></button>
+            <button id="italBtn" type="button" title="Italique"><i>I</i></button>
+          </div>
+        </div>
+        <div class="field"><label>Aligne</label>
+          <div class="segmented">
+            <button type="button" data-align="left" class="on">&#8676;</button>
+            <button type="button" data-align="center">&#8596;</button>
+            <button type="button" data-align="right">&#8677;</button>
+          </div>
+        </div>
+      </div>
+      <div class="detected" id="detected"></div>
+      <div class="row-actions">
+        <button class="btn primary" id="applyBtn">Appliquer</button>
+        <button class="btn ghost" id="cancelBtn">Fermer</button>
+      </div>
+    </div>
+  </aside>
+
+  <nav class="dock" id="dock">
+    <button class="tool on" data-tool="select">Texte</button>
+    <button class="tool" data-tool="erase">Gomme</button>
+    <button class="tool" data-tool="add">Ajouter</button>
+    <button class="tool" data-tool="image">Image</button>
+    <span class="dock-sep"></span>
+    <button class="tool" id="zoomOut" aria-label="Reduire">&minus;</button>
+    <span class="zoom" id="zoomLabel">100%</span>
+    <button class="tool" id="zoomIn" aria-label="Agrandir">+</button>
+    <span class="dock-sep"></span>
+    <button class="tool" id="prevPage" aria-label="Page precedente">&#8249;</button>
+    <span class="zoom" id="pageLabel">1/1</span>
+    <button class="tool" id="nextPage" aria-label="Page suivante">&#8250;</button>
+  </nav>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<div class="veil" id="veil" hidden>
+  <div class="spinner"></div>
+  <span id="veilText">Analyse...</span>
+  <div class="progress" id="progressWrap" hidden><i id="progressBar"></i></div>
+</div>
+
+<script src="vendor/pdflib/pdf-lib.min.js"></script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
+<script type="module">
+  import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
+  pdfjs.GlobalWorkerOptions.workerSrc = "vendor/pdfjs/pdf.worker.min.mjs";
+  window.pdfjsLib = pdfjs;
+  await import("./js/ui.js");
+</script>
+</body>
+</html>
