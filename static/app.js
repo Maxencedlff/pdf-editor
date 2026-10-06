@@ -452,6 +452,21 @@ async function boot() {
   });
 
   initMarquee();
+  openFromUrl();
+}
+
+/* Ouverture directe : /?file=<chemin local du PDF> */
+async function openFromUrl() {
+  const path = new URLSearchParams(location.search).get("file");
+  if (!path) return;
+  try {
+    const r = await fetch(`/api/local?path=${encodeURIComponent(path)}`);
+    if (!r.ok) throw new Error("Fichier introuvable : " + path);
+    const name = path.split(/[\\/]/).pop();
+    await openFile(new File([await r.blob()], name, { type: "application/pdf" }));
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function setZoom(z) {

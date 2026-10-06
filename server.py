@@ -32,6 +32,23 @@ def get(doc_id: str) -> Doc:
     return d
 
 
+LOCAL_ROOT = Path("/mnt/c/Users/maxde").resolve()
+
+
+@app.get("/api/local")
+def local_file(path: str):
+    """Sert un PDF du disque, pour ouvrir l'editeur directement sur un fichier (?file=...).
+
+    Accepte un chemin Windows (C:\\...) ou WSL ; limite au dossier utilisateur.
+    """
+    if len(path) > 2 and path[1] == ":":
+        path = "/mnt/" + path[0].lower() + path[2:].replace("\\", "/")
+    p = Path(path).resolve()
+    if not p.is_relative_to(LOCAL_ROOT) or p.suffix.lower() != ".pdf" or not p.is_file():
+        raise HTTPException(404, "Fichier introuvable.")
+    return FileResponse(p, media_type="application/pdf", filename=p.name)
+
+
 @app.get("/api/config")
 def config():
     return {
