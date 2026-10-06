@@ -246,7 +246,7 @@ def _shape_iou(a: np.ndarray, b: np.ndarray) -> float:
     du texte et ecraserait tous les scores. La chasse perdue ici est reintroduite
     separement par _aspect_score.
     """
-    if a.shape[1] != b.shape[1]:
+    if a.shape != b.shape:
         b = np.asarray(
             Image.fromarray((b * 255).astype(np.uint8)).resize((a.shape[1], a.shape[0]), Image.BILINEAR)
         ) > 110
