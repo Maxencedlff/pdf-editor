@@ -7,7 +7,7 @@ const FAMILIES = [
   ["sans", "Sans (Arial)", "LiberationSans", ["Regular", "Bold", "Italic", "BoldItalic"]],
   ["serif", "Serif (Times)", "LiberationSerif", ["Regular", "Bold", "Italic", "BoldItalic"]],
   ["mono", "Mono (Courier)", "LiberationMono", ["Regular", "Bold", "Italic", "BoldItalic"]],
-  ["narrow", "Sans etroit", "LiberationSansNarrow", ["Regular", "Bold", "Italic", "BoldItalic"]],
+  ["narrow", "Sans étroit", "LiberationSansNarrow", ["Regular", "Bold", "Italic", "BoldItalic"]],
   ["sans2", "Sans (Verdana)", "DejaVuSans", ["Regular", "Bold", "Oblique", "BoldOblique"]],
   ["serif2", "Serif (DejaVu)", "DejaVuSerif", ["Regular", "Bold", "Italic", "BoldItalic"]],
   ["mono2", "Mono (DejaVu)", "DejaVuSansMono", ["Regular", "Bold", "Oblique", "BoldOblique"]],

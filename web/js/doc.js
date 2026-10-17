@@ -320,6 +320,10 @@ export class PdfDoc {
 
     const pages = out.getPages();
     for (let idx = 0; idx < pages.length; idx++) {
+      // La rotation s'applique avant le tri des pages sans retouche : une page simplement
+      // pivotee doit l'etre aussi dans le fichier exporte.
+      const rot = this.rotations.get(idx) || 0;
+      if (rot) pages[idx].setRotation(degrees((pages[idx].getRotation().angle + rot) % 360));
       const ops = this.opsFor(idx);
       if (!ops.length) continue;
       if (onProgress) onProgress(idx / pages.length);
@@ -347,8 +351,6 @@ export class PdfDoc {
           } catch (_) { /* caractere hors WinAnsi */ }
         }
       }
-      const rot = this.rotations.get(idx) || 0;
-      if (rot) page.setRotation(degrees((page.getRotation().angle + rot) % 360));
     }
 
     for (const idx of [...this.removed].sort((a, b) => b - a)) {
