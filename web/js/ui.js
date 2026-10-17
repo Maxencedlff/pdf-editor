@@ -378,7 +378,11 @@ function selectItem(item, el) {
   document.querySelectorAll(".hit.on").forEach((e) => e.classList.remove("on"));
   el?.classList.add("on");
   S.sel = item; S.draft = null;
-  fillEditor(item);
+  // Une zone deja retouchee se rouvre avec les reglages de sa retouche, pas avec les
+  // mesures d'origine : sinon appliquer de nouveau les effacerait.
+  const op = S.edits.get(item.id);
+  fillEditor(item, op ? { ...item, text: op.text, size: op.size, color: op.color, fontKey: op.fontKey,
+    bold: op.bold, italic: op.italic, align: op.align } : item);
   revealAboveSheet(el);
 }
 
@@ -405,7 +409,8 @@ const familyOf = (key) => fonts.resolve(key).family;
 const regularKey = (family) => (FAMILIES.find((f) => f.family === family) || FAMILIES[0]).key;
 const fontLabel = (key) => FAMILIES.find((f) => f.family === familyOf(key))?.label || key;
 
-function fillEditor(it) {
+/** `it` porte les mesures (analyse, couleur d'origine) ; `shown` les valeurs a editer. */
+function fillEditor(it, shown = it) {
   const isNew = it.source === "new";
   $("inspectorEmpty").hidden = true;
   $("editor").hidden = false;
@@ -413,16 +418,16 @@ function fillEditor(it) {
   $("editorTitle").textContent = isNew ? "Nouveau texte" : "Modifier le texte";
   $("doneBtn").textContent = isNew ? "Ajouter" : "OK";
   $("applyBtn").textContent = isNew ? "Ajouter" : "Appliquer";
-  $("txt").value = it.text || "";
+  $("txt").value = shown.text || "";
   $("txt").placeholder = isNew ? "Saisissez le texte" : "";
   autosize();
-  $("sizeIn").value = NUM.format(Math.round((it.size ?? 12) * 10) / 10);
-  $("fontSel").value = familyOf(it.fontKey || fonts.DEFAULT_KEY);
-  setPressed($("boldBtn"), !!it.bold);
-  setPressed($("italBtn"), !!it.italic);
-  setAlign(it.align || "left");
+  $("sizeIn").value = NUM.format(Math.round((shown.size ?? 12) * 10) / 10);
+  $("fontSel").value = familyOf(shown.fontKey || fonts.DEFAULT_KEY);
+  setPressed($("boldBtn"), !!shown.bold);
+  setPressed($("italBtn"), !!shown.italic);
+  setAlign(shown.align || "left");
   S.origin = it.color && (!isNew || it.color.toLowerCase() !== "#111111") ? it.color : null;
-  S.color = it.color || "#111111";
+  S.color = shown.color || "#111111";
   buildSwatches();
   $("analysis").innerHTML = isNew ? "" : analysisHtml(it);
 }

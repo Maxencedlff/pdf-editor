@@ -176,4 +176,7 @@ def index():
     return FileResponse(BASE / "static" / "index.html")
 
 
+# La version locale reprend la feuille de style et les icones de la version web (une
+# seule source de design) : le dossier web est servi en lecture seule sous /web.
+app.mount("/web", StaticFiles(directory=BASE / "web"), name="web")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")

@@ -31,12 +31,20 @@ bien mais porte l'icone generique des fichiers de commande.
 | **Gomme** | Efface une zone en reconstituant le fond |
 | **Ajouter** | Nouveau bloc de texte n'importe ou |
 | **Image** | Insere une image ou une signature |
-| **Relire** | Force la relecture de la page dans l'autre mode (OCR ou texte natif) |
-| Panneau des pages | Rotation, suppression |
-| Telecharger | Export du PDF modifie |
+| **Relire** | Inspecteur, section « Cette page » (ou menu de la miniature) : relit la page dans l'autre mode (OCR ou texte natif). Version locale |
+| Miniatures | Menu (clic droit, appui long ou bouton ⋯) : pivoter a gauche ou a droite, supprimer la page |
+| Exporter | Bouton de partage : telechargement a la souris, feuille de partage du systeme au doigt |
 
-Raccourcis : `Ctrl+Z` annuler, `Ctrl+Entree` appliquer, `Echap` deselectionner,
-fleches gauche/droite pour changer de page.
+Interface dans l'esprit des applications Apple, commune aux deux versions (`web/app.css`
+est aussi servi a la version locale sous `/web`) : clair et sombre selon le systeme,
+densite macOS a la souris, iOS au doigt. Toute action se defait et se refait, y compris
+rotations et suppressions de pages.
+
+Raccourcis (Cmd sur Mac, Ctrl ailleurs) : `Cmd+Z` annuler, `Maj+Cmd+Z` retablir,
+`Cmd+Entree` appliquer, `Cmd+S` exporter, `Cmd+O` ouvrir, `Cmd+R` / `Cmd+L` pivoter,
+`Cmd++` / `Cmd+-` / `Cmd+0` zoom, `Echap` deselectionner, fleches pour changer de page.
+Au doigt : pincement et double-tap pour zoomer, feuille d'edition que l'on glisse vers le
+bas pour la fermer.
 
 ## Comment la fidelite est obtenue
 

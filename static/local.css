@@ -1,0 +1,42 @@
+/* Ajouts propres a la version locale, charges apres /web/app.css (source unique du design).
+   On n'y met que ce qui n'existe pas dans la version web : interrupteur, ligne d'action
+   et reperes permanents des zones de texte. Memes jetons, memes densites. */
+
+/* ---------------------------------------------------------------- ligne d'action */
+/* Bouton qui occupe toute une ligne de liste groupee, texte teinte, comme dans Reglages. */
+.row-action{
+  width:100%;border:0;background:none;color:var(--accent);font-size:var(--fs);
+  text-align:left;justify-content:flex-start;transition:background-color .15s;
+}
+.row-action:active{background:var(--fill-3)}
+.row-action:disabled{color:var(--label-3)}
+@media (hover:hover){ .row-action:hover:not(:disabled){background:var(--fill-4)} }
+label.row{cursor:default}
+
+/* ---------------------------------------------------------------- interrupteur */
+/* Interrupteur iOS au doigt (51 x 31, vert), plus petit et teinte a la souris (macOS). */
+.switch{
+  -webkit-appearance:none;appearance:none;position:relative;flex:none;margin:0;
+  width:51px;height:31px;border-radius:999px;background:var(--fill);
+  transition:background-color .25s;cursor:default;
+}
+.switch::before{
+  content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;
+  background:#fff;box-shadow:0 3px 8px rgba(0,0,0,.15),0 3px 1px rgba(0,0,0,.06);
+  transition:transform .3s var(--ease);
+}
+.switch:checked{background:var(--green)}
+.switch:checked::before{transform:translateX(20px)}
+.switch:focus-visible{outline:3px solid rgba(var(--accent-rgb),.5);outline-offset:2px;border-radius:999px}
+@media (pointer:fine){
+  .switch{width:26px;height:15px}
+  .switch::before{top:1px;left:1px;width:13px;height:13px;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  .switch:checked{background:var(--accent)}
+  .switch:checked::before{transform:translateX(11px)}
+}
+
+/* ---------------------------------------------------------------- reperes */
+/* Interrupteur « Afficher les zones » : toutes les zones restent teintees, comme au doigt. */
+.overlay.show .hit{background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 1px rgba(var(--accent-rgb),.45)}
+.overlay.show .hit.on{background:rgba(var(--accent-rgb),.14);box-shadow:0 0 0 2px var(--accent)}
+.overlay.show .hit.draft{background:rgba(var(--accent-rgb),.06);box-shadow:none}
