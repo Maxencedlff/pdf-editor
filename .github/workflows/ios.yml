@@ -1,0 +1,150 @@
+name: iOS
+
+# Lance a la main (onglet Actions, ou gh workflow run ios.yml) :
+#  - controle (par defaut) : compile pour le simulateur, lance l'app sur un iPhone virtuel et
+#    joint des captures d'ecran. Ne demande aucun secret Apple.
+#  - testflight : compile la version signee et l'envoie sur App Store Connect (TestFlight).
+# Meme chaine que MDLF Training (depot Muscu), sans extension.
+on:
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: Envoyer une version signée sur TestFlight
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-${{ github.ref }}-${{ inputs.testflight }}
+  # un envoi TestFlight ne s'annule jamais en cours de route
+  cancel-in-progress: ${{ !inputs.testflight }}
+
+env:
+  SCHEME: App
+  PROJECT: ios/App/App.xcodeproj
+
+defaults:
+  run:
+    shell: bash   # bash -eo pipefail : une erreur suivie de « | tail » fait bien echouer l'etape
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Contenu web et synchronisation iOS
+        run: npm run web:build && npx cap sync ios
+
+      # Apple refuse les envois compiles avec un SDK anterieur a iOS 26
+      - name: Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$X" ]; then echo "Xcode 26 absent de l'image :"; ls /Applications | grep -i xcode; exit 1; fi
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+
+      # ── Mode controle ─────────────────────────────────────────────
+      - name: Compilation pour le simulateur
+        if: ${{ !inputs.testflight }}
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1 || {
+              grep -E -A4 'error:|BUILD FAILED' xcodebuild.log | head -120; exit 1; }
+          tail -3 xcodebuild.log
+
+      - name: Lancement sur un iPhone virtuel et captures
+        if: ${{ !inputs.testflight }}
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E 'iPhone 1[6-9] Pro \(' | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          echo "Simulateur : $DEVICE"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          APP=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          xcrun simctl install "$DEVICE" "$APP"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          mkdir -p shots
+          xcrun simctl ui "$DEVICE" appearance light
+          xcrun simctl launch "$DEVICE" "$BUNDLE"
+          sleep 12; xcrun simctl io "$DEVICE" screenshot shots/1-accueil-clair.png
+          xcrun simctl ui "$DEVICE" appearance dark
+          sleep 4; xcrun simctl io "$DEVICE" screenshot shots/2-accueil-sombre.png
+          # « Ouvrir avec » : un PDF confie a l'app doit s'ouvrir directement
+          xcrun simctl ui "$DEVICE" appearance light
+          curl -sL -o "$RUNNER_TEMP/test.pdf" https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
+          xcrun simctl openurl "$DEVICE" "file://$RUNNER_TEMP/test.pdf" || true
+          sleep 12; xcrun simctl io "$DEVICE" screenshot shots/3-document.png
+          xcrun simctl spawn "$DEVICE" log show --last 2m --style compact \
+            --predicate 'process == "App"' > shots/journal-app.txt 2>&1 || true
+          grep -iE 'error|exception|⚡' shots/journal-app.txt | head -40 || true
+          xcrun simctl spawn "$DEVICE" launchctl list > shots/launchctl.txt
+          grep -q "$BUNDLE" shots/launchctl.txt && echo "L'app tourne"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !inputs.testflight }}
+        with:
+          name: captures-simulateur
+          path: shots/
+
+      # ── Mode TestFlight ───────────────────────────────────────────
+      - name: Certificat et profil de distribution
+        if: ${{ inputs.testflight }}
+        env:
+          DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+          DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+          APPSTORE_PROFILE: ${{ secrets.APPSTORE_PROFILE }}
+        run: |
+          if [ -z "$APPSTORE_PROFILE" ] || [ -z "$DIST_CERT_P12" ]; then echo "Secrets de signature absents"; exit 1; fi
+          KEYCHAIN=$RUNNER_TEMP/signature.keychain-db
+          KC_PASS=$(openssl rand -base64 24)
+          echo "$DIST_CERT_P12" | base64 --decode > $RUNNER_TEMP/dist.p12
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import $RUNNER_TEMP/dist.p12 -P "$DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$PROFILES"
+          echo "$APPSTORE_PROFILE" | base64 --decode > "$PROFILES/appstore.mobileprovision"
+          rm $RUNNER_TEMP/dist.p12
+
+      - name: Clé d'API App Store Connect
+        if: ${{ inputs.testflight }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
+
+      - name: Archive signée
+        if: ${{ inputs.testflight }}
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/App.xcarchive archive \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -40
+
+      - name: Export et envoi sur App Store Connect
+        if: ${{ inputs.testflight }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive -archivePath build/App.xcarchive \
+            -exportOptionsPlist ios/ExportOptions.plist -exportPath build/export \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tail -40
+
+      - name: Nettoyage du trousseau
+        if: ${{ always() && inputs.testflight }}
+        run: security delete-keychain $RUNNER_TEMP/signature.keychain-db || true

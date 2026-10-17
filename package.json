@@ -1,0 +1,24 @@
+{
+  "name": "editeur-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Éditeur PDF : version web (web/, Vercel) et app iOS (Capacitor, ios/)",
+  "scripts": {
+    "web:build": "node scripts/build-web.mjs",
+    "ios:sync": "npm run web:build && cap sync ios"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "8.0.3",
+    "@capacitor/splash-screen": "^8.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3"
+  }
+}

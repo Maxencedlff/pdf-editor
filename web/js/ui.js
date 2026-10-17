@@ -12,6 +12,7 @@
 
 import * as fonts from "./fonts.js";
 import { PdfDoc } from "./doc.js";
+import * as native from "./native.js";
 
 const $ = (id) => document.getElementById(id);
 const IS_APPLE = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -934,6 +935,14 @@ async function exportPdf() {
   }
   veil(false);
 
+  // Dans l'app iOS, la feuille de partage native : le telechargement n'existe pas.
+  if (native.isNative) {
+    try {
+      if (await native.shareFile(file)) { S.cleanAt = S.past.length; updateTitle(); }
+    } catch (e) { console.error(e); toast("Le partage a échoué : " + e.message, true); }
+    return;
+  }
+
   // Au doigt, la feuille de partage du systeme (Enregistrer dans Fichiers, Mail…) ; a la
   // souris, un telechargement classique.
   if (!FINE.matches && navigator.canShare?.({ files: [file] })) {
@@ -1237,6 +1246,7 @@ function boot() {
   initGestures();
   initSheetDrag();
   initKeyboardInset();
+  native.onOpenDocument(openFile);
   window.__ready = true;
 }
 

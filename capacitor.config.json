@@ -1,0 +1,17 @@
+{
+  "appId": "com.mdlf.editeurpdf",
+  "appName": "Éditeur PDF",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 600,
+      "launchFadeOutDuration": 200,
+      "showSpinner": false
+    }
+  }
+}
