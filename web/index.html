@@ -52,6 +52,7 @@
     <symbol id="i-updown" viewBox="0 0 24 24"><path d="m8 9.5 4-4 4 4M8 14.5l4 4 4-4"/></symbol>
     <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M9 4.5c1.6 0 3 .6 3 2.2v10.6c0 1.6-1.4 2.2-3 2.2M15 4.5c-1.6 0-3 .6-3 2.2M15 19.5c-1.6 0-3-.6-3-2.2M10 12h4"/></symbol>
     <symbol id="i-wand" viewBox="0 0 24 24"><path d="m4 20 10.5-10.5M13 8l3 3"/><path d="M17.5 3v3M16 4.5h3M20 9v2M19 10h2M10 3.5v2M9 4.5h2"/></symbol>
+    <symbol id="i-signature" viewBox="0 0 24 24"><path d="M3 15.5c1.6-2.7 3.1-7.5 5-7.5 1.7 0-.4 7.5 1.4 7.5 1.4 0 2.2-3.4 3.5-3.4s.8 2.6 2.1 2.6c.9 0 1.6-1 2.4-1.6"/><path d="M3 19.5h18"/></symbol>
     <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/><path d="m13.5 6.5 3 3"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5M12 14.5v2"/></symbol>
     <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8Z"/><path d="M14 3.5V8h4.5M9 12.5h6M9 16h4"/></symbol>
@@ -72,7 +73,8 @@
     <button class="tb-btn tool" type="button" data-tool="select" aria-pressed="true" aria-label="Modifier le texte"><svg class="sym"><use href="#i-text"/></svg></button>
     <button class="tb-btn tool" type="button" data-tool="erase" aria-pressed="false" aria-label="Gomme"><svg class="sym"><use href="#i-eraser"/></svg></button>
     <button class="tb-btn tool" type="button" data-tool="add" aria-pressed="false" aria-label="Ajouter du texte"><svg class="sym"><use href="#i-textbox"/></svg></button>
-    <button class="tb-btn tool" type="button" data-tool="image" aria-pressed="false" aria-label="Image ou signature"><svg class="sym"><use href="#i-photo"/></svg></button>
+    <button class="tb-btn tool" type="button" data-tool="sign" aria-pressed="false" aria-label="Signer"><svg class="sym"><use href="#i-signature"/></svg></button>
+    <button class="tb-btn tool" type="button" data-tool="image" aria-pressed="false" aria-label="Image"><svg class="sym"><use href="#i-photo"/></svg></button>
   </div>
   <div class="tb-trailing" id="tbTrailing" hidden>
     <button class="tb-btn" id="undoBtn" type="button" disabled aria-label="Annuler"><svg class="sym"><use href="#i-undo"/></svg></button>
@@ -130,6 +132,7 @@
 
     <div class="hint" id="hint" hidden>
       <span id="hintText"></span>
+      <button type="button" id="hintAlt" hidden>Nouvelle</button>
       <button type="button" id="hintDone">OK</button>
     </div>
 
@@ -229,6 +232,7 @@
     <button class="dock-btn tool" type="button" data-tool="select" aria-pressed="true"><svg class="sym"><use href="#i-text"/></svg><span>Texte</span></button>
     <button class="dock-btn tool" type="button" data-tool="erase" aria-pressed="false"><svg class="sym"><use href="#i-eraser"/></svg><span>Gomme</span></button>
     <button class="dock-btn tool" type="button" data-tool="add" aria-pressed="false"><svg class="sym"><use href="#i-textbox"/></svg><span>Ajouter</span></button>
+    <button class="dock-btn tool" type="button" data-tool="sign" aria-pressed="false"><svg class="sym"><use href="#i-signature"/></svg><span>Signer</span></button>
     <button class="dock-btn tool" type="button" data-tool="image" aria-pressed="false"><svg class="sym"><use href="#i-photo"/></svg><span>Image</span></button>
   </nav>
 </main>
@@ -250,6 +254,29 @@
 
 <div class="menu-layer" id="menuLayer" hidden>
   <div class="menu" id="menu" role="menu"></div>
+</div>
+
+<div class="sig-layer" id="sigLayer" hidden>
+  <div class="sig" role="dialog" aria-modal="true" aria-labelledby="sigTitle">
+    <header class="sig-head">
+      <button type="button" class="sig-link" id="sigCancel">Annuler</button>
+      <h3 id="sigTitle">Signature</h3>
+      <button type="button" class="sig-link strong" id="sigDone" disabled>OK</button>
+    </header>
+    <div class="sig-pad">
+      <canvas id="sigCanvas" aria-label="Zone de signature"></canvas>
+      <p class="sig-placeholder" id="sigPlaceholder">Signez ici</p>
+      <div class="sig-line" aria-hidden="true"></div>
+    </div>
+    <footer class="sig-foot">
+      <div class="sig-inks" role="radiogroup" aria-label="Couleur de l’encre">
+        <button type="button" class="sig-ink" role="radio" data-ink="#1c1c1e" aria-label="Noir" aria-checked="true" style="--ink:#1c1c1e"></button>
+        <button type="button" class="sig-ink" role="radio" data-ink="#1f3a8a" aria-label="Bleu" aria-checked="false" style="--ink:#1f3a8a"></button>
+      </div>
+      <p class="sig-note">Enregistrée sur cet appareil uniquement</p>
+      <button type="button" class="sig-link" id="sigClear" disabled>Effacer</button>
+    </footer>
+  </div>
 </div>
 
 <div class="alert-layer" id="alertLayer" hidden>

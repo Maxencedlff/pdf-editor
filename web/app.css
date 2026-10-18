@@ -85,7 +85,7 @@ button:disabled{cursor:default}
 .toolbar{
   position:fixed;top:0;left:0;right:0;z-index:40;
   height:var(--top);padding:var(--safe-t) calc(6px + var(--safe-r)) 0 calc(6px + var(--safe-l));
-  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:4px;
+  display:grid;grid-template-columns:minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr);align-items:center;gap:4px;
   background:var(--material);
   -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
   box-shadow:0 .5px 0 var(--sep);
@@ -187,8 +187,8 @@ main{position:fixed;inset:0;display:grid;grid-template-columns:minmax(0,1fr)}
 .hit:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(var(--accent-rgb),.6)}
 .hit.low::after{content:"";position:absolute;right:-4px;top:-4px;width:8px;height:8px;border-radius:50%;
   background:var(--orange);box-shadow:0 0 0 1.5px #fff}
-.canvas.tool-erase,.canvas.tool-add,.canvas.tool-image{cursor:crosshair;touch-action:none}
-.canvas.tool-erase .hit,.canvas.tool-add .hit,.canvas.tool-image .hit{pointer-events:none;background:none}
+.canvas.tool-erase,.canvas.tool-add,.canvas.tool-image,.canvas.tool-sign{cursor:crosshair;touch-action:none}
+.canvas.tool-erase .hit,.canvas.tool-add .hit,.canvas.tool-image .hit,.canvas.tool-sign .hit{pointer-events:none;background:none}
 .marquee{position:absolute;border:1.5px solid var(--accent);border-radius:2px;
   background:rgba(var(--accent-rgb),.1);pointer-events:none}
 .tool-erase .marquee{border-style:dashed}
@@ -469,6 +469,32 @@ textarea{
 @keyframes drop-in{from{opacity:0;transform:translate(-50%,-10px) scale(.96)}}
 @keyframes lift-out{to{opacity:0;transform:translate(-50%,-8px) scale(.97)}}
 @keyframes pop{from{opacity:0;transform:scale(.86)}}
+/* bloc de signature : une feuille blanche comme du papier, quel que soit le theme */
+.sig-layer{position:fixed;inset:0;z-index:85;display:grid;place-items:center;
+  padding:calc(16px + var(--safe-t)) calc(12px + var(--safe-r)) calc(16px + var(--safe-b)) calc(12px + var(--safe-l));
+  background:rgba(0,0,0,.35);animation:fade .2s}
+.sig{width:min(560px,100%);border-radius:14px;overflow:hidden;background:var(--panel);
+  box-shadow:0 20px 60px rgba(0,0,0,.3);animation:alert-in .3s var(--ease)}
+.sig-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:50px;padding:0 6px;
+  box-shadow:0 .5px 0 var(--sep)}
+.sig-head h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.02em}
+.sig-head .sig-link:last-child{justify-self:end}
+.sig-head .sig-link:first-child{justify-self:start}
+.sig-link{border:0;background:none;color:var(--accent);font-size:17px;height:44px;padding:0 10px}
+.sig-link.strong{font-weight:600}
+.sig-link:disabled{color:var(--label-3,rgba(60,60,67,.3))}
+.sig-pad{position:relative;height:min(220px,40dvh);margin:14px;border-radius:10px;background:#fff;
+  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+.sig-pad canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;z-index:1}
+.sig-line{position:absolute;left:24px;right:24px;bottom:30%;border-top:1px solid rgba(60,60,67,.25)}
+.sig-placeholder{position:absolute;left:0;right:0;top:calc(70% - 34px);margin:0;text-align:center;
+  font-size:15px;color:rgba(60,60,67,.45);pointer-events:none}
+.sig-foot{display:flex;align-items:center;gap:12px;padding:0 8px 8px 18px}
+.sig-inks{display:flex;gap:10px}
+.sig-ink{width:28px;height:28px;border-radius:50%;border:0;padding:0;background:var(--ink);
+  box-shadow:inset 0 0 0 1px var(--sep),0 0 0 2px var(--panel),0 0 0 2px transparent;transition:box-shadow .15s}
+.sig-ink[aria-checked="true"]{box-shadow:inset 0 0 0 1px var(--sep),0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.sig-note{flex:1;margin:0;font-size:12px;color:var(--label-2);text-align:center}
 @keyframes alert-in{from{opacity:0;transform:scale(1.12)}}
 @keyframes spoke{from{opacity:1}to{opacity:.18}}
 

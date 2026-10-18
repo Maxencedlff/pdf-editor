@@ -13,6 +13,7 @@
 import * as fonts from "./fonts.js";
 import { PdfDoc } from "./doc.js";
 import * as native from "./native.js";
+import { drawSignature, savedSignature } from "./signature.js";
 
 const $ = (id) => document.getElementById(id);
 const IS_APPLE = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -639,15 +640,33 @@ const HINTS = {
   erase: "Faites glisser sur la zone à effacer.",
   add: "Tracez le cadre du nouveau texte.",
   image: "Tracez l’emplacement de l’image.",
+  sign: "Touchez où signer.",
 };
 
 function setTool(name) {
   S.tool = name;
   document.querySelectorAll("[data-tool]").forEach((b) => setPressed(b, b.dataset.tool === name));
-  $("canvas").classList.remove("tool-erase", "tool-add", "tool-image");
+  $("canvas").classList.remove("tool-erase", "tool-add", "tool-image", "tool-sign");
   if (name !== "select") { $("canvas").classList.add("tool-" + name); clearSelection(); }
   $("hint").hidden = name === "select";
   $("hintText").textContent = HINTS[name] || "";
+  $("hintAlt").hidden = name !== "sign";
+}
+
+/** Bouton d'outil. « Signer » pose la signature enregistree, ou ouvre d'abord le bloc pour
+    la dessiner ; les autres outils s'activent et se desactivent d'un toucher. */
+async function pickTool(name) {
+  if (S.tool === name && name !== "select") return setTool("select");
+  if (name !== "sign") return setTool(name);
+  const sig = (await savedSignature()) || (await drawSignature());
+  if (!sig) return setTool("select");
+  S.signature = sig;
+  setTool("sign");
+}
+
+async function redrawSignature() {
+  const sig = await drawSignature();
+  if (sig) S.signature = sig;
 }
 
 /** Point de l'ecran -> coordonnees dans la page affichee (avant rotation), en pixels. */
@@ -695,7 +714,8 @@ function initMarquee() {
     const p = clamp(toLocal(e.clientX, e.clientY));
     const box = [Math.min(p.x, start.x), Math.min(p.y, start.y), Math.max(p.x, start.x), Math.max(p.y, start.y)];
     cancel();
-    if (box[2] - box[0] < 8 || box[3] - box[1] < 8) return;
+    const tap = box[2] - box[0] < 8 || box[3] - box[1] < 8;
+    if (tap && S.tool !== "sign") return;
     // Un trace se termine par un evenement `click` : sans ce garde-fou, il
     // deselectionnerait aussitot le bloc que le trace vient de creer.
     swallowNextClick = true;
@@ -705,6 +725,7 @@ function initMarquee() {
     if (S.tool === "erase") await eraseZone(bbox);
     else if (S.tool === "add") newTextBlock(bbox);
     else if (S.tool === "image") insertImage(bbox);
+    else if (S.tool === "sign") await placeSignature(bbox, tap);
   });
 }
 
@@ -747,27 +768,47 @@ function newTextBlock(bbox) {
   setTimeout(() => $("txt").focus(), isSheet() ? 320 : 0);
 }
 
+/** Pose une image dans un cadre de la page : elle y tient entiere, proportions
+    conservees, centree. */
+async function placeBitmap(bitmap, bbox) {
+  const bw = bbox[2] - bbox[0], bh = bbox[3] - bbox[1];
+  const k = Math.min(bw / bitmap.width, bh / bitmap.height);
+  const w = bitmap.width * k, h = bitmap.height * k;
+  const x = bbox[0] + (bw - w) / 2, y = bbox[1] + (bh - h) / 2;
+  const op = { type: "image", page: S.page, bbox: [x, y, x + w, y + h], bitmap };
+  S.doc.addOp(op);
+  record({ type: "op", page: S.page, op, replaced: null, itemId: null });
+  await refreshCurrent();
+}
+
 function insertImage(bbox) {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "image/*";
   inp.onchange = async () => {
     const f = inp.files[0];
     if (!f) return;
-    try {
-      const bitmap = await createImageBitmap(f);
-      // L'image tient dans le cadre trace, proportions conservees, centree.
-      const bw = bbox[2] - bbox[0], bh = bbox[3] - bbox[1];
-      const k = Math.min(bw / bitmap.width, bh / bitmap.height);
-      const w = bitmap.width * k, h = bitmap.height * k;
-      const x = bbox[0] + (bw - w) / 2, y = bbox[1] + (bh - h) / 2;
-      const op = { type: "image", page: S.page, bbox: [x, y, x + w, y + h], bitmap };
-      S.doc.addOp(op);
-      record({ type: "op", page: S.page, op, replaced: null, itemId: null });
-      await refreshCurrent();
-    } catch (e) { console.error(e); toast("Cette image ne peut pas être lue.", true); }
+    try { await placeBitmap(await createImageBitmap(f), bbox); }
+    catch (e) { console.error(e); toast("Cette image ne peut pas être lue.", true); }
   };
   inp.click();
   setTool("select");
+}
+
+/** Un toucher pose la signature a la taille d'une signature manuscrite (environ 5 cm de
+    large sur une page A4), centree sur le doigt ; un cadre trace impose sa taille. */
+async function placeSignature(bbox, tap) {
+  const sig = S.signature;
+  if (!sig) return;
+  if (tap) {
+    const cx = bbox[0], cy = bbox[1];
+    const w = Math.min(S.size.width * 0.28, S.size.width - 8);
+    const h = (w * sig.height) / sig.width;
+    const x = Math.max(4, Math.min(S.size.width - w - 4, cx - w / 2));
+    const y = Math.max(4, Math.min(S.size.height - h - 4, cy - h / 2));
+    bbox = [x, y, x + w, y + h];
+  }
+  setTool("select");
+  await placeBitmap(sig, bbox);
 }
 
 /* ================================================================ pages */
@@ -1175,7 +1216,7 @@ function boot() {
     prevPage: "Page précédente (←)", nextPage: "Page suivante (→)",
   };
   for (const [id, t] of Object.entries(tips)) $(id).title = t;
-  const toolTips = { select: "Modifier le texte", erase: "Gomme", add: "Ajouter du texte", image: "Image ou signature" };
+  const toolTips = { select: "Modifier le texte", erase: "Gomme", add: "Ajouter du texte", sign: "Signer", image: "Image" };
   document.querySelectorAll(".tb-btn[data-tool]").forEach((b) => (b.title = toolTips[b.dataset.tool]));
 
   $("picker").onchange = (e) => { openFile(e.target.files[0]); e.target.value = ""; };
@@ -1193,7 +1234,8 @@ function boot() {
   $("sizeIn").onblur = () => ($("sizeIn").value = NUM.format(readSize(12)));
   $("txt").oninput = autosize;
   document.querySelectorAll("[data-align]").forEach((b) => (b.onclick = () => setAlign(b.dataset.align)));
-  document.querySelectorAll("[data-tool]").forEach((b) => (b.onclick = () => setTool(S.tool === b.dataset.tool && b.dataset.tool !== "select" ? "select" : b.dataset.tool)));
+  document.querySelectorAll("[data-tool]").forEach((b) => (b.onclick = () => pickTool(b.dataset.tool)));
+  $("hintAlt").onclick = redrawSignature;
   $("hintDone").onclick = () => setTool("select");
   $("pagesBtn").onclick = () => setSidebar(!sidebarOpen());
   $("scrim").onclick = () => setSidebar(false);
