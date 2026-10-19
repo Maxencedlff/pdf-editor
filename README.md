@@ -124,8 +124,18 @@ pdfcore/fonts.py     catalogue de polices + reconnaissance par comparaison d'ima
 pdfcore/ocr.py       Tesseract, regroupement en lignes, decoupe des colonnes
 pdfcore/raster.py    couleurs, effacement par inpainting, dessin du texte
 pdfcore/document.py  analyse des pages, application des modifications, export
-static/              interface
-tests/               tests du moteur
+static/              interface de la version locale
+web/                 version web, embarquee telle quelle dans l'app iOS
+  js/ui.js           interface : ouverture, rendu, selection, historique, pages, gestes, export
+  js/doc.js          modele du document : pages (ordre, copies, PDF ajoutes), retouches, export pdf-lib
+  js/marks.js        annotations : geometrie, dessin a l'ecran, export vectoriel
+  js/annotate.js     outil Annoter : palette et saisie (doigt, souris, Apple Pencil)
+  js/objects.js      objets poses : selection au trait, deplacement, poignees, barre d'actions
+  js/signature.js    bloc de signature, memorise sur l'appareil
+  js/native.js       pont vers l'app iOS (partage, « Ouvrir avec »)
+  js/fonts.js, imaging.js, ocr.js   polices, traitement d'image, reconnaissance
+ios/                 projet Xcode (Capacitor) ; compile par .github/workflows/ios.yml
+tests/               tests du moteur Python et de la version web
 ```
 
 ## Tests
@@ -134,6 +144,9 @@ tests/               tests du moteur
 python3 tests/test_fontmatch.py   # precision de la reconnaissance de police
 python3 tests/make_samples.py     # fabrique un PDF natif + sa version scannee
 python3 tests/test_pipeline.py    # analyse + edition + export sur les deux
+node --test tests/web/            # geometrie des annotations (sans navigateur)
+python3 tests/web/e2e.py          # version web de bout en bout (Playwright) : ordre des
+                                  # pages, copies, historique, toucher, pages pivotees
 ```
 
 ## Limites connues

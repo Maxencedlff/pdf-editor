@@ -33,7 +33,6 @@ const INK_PRESETS = ["#111111", "#3a3a3c", "#1d3c8f", "#b3261e", "#1e6b35"];
 const S = {
   doc: null, page: 0, zoom: 1, baseScale: 1, tool: "select",
   analysis: null, sel: null, draft: null, busy: false, size: null,
-  edits: new Map(),        // id de zone -> operation en vigueur
   past: [], future: [],    // historique annuler / retablir
   cleanAt: 0,              // longueur de l'historique au dernier export
   turn: new Map(),         // angle affiche par page, cumule pour animer dans le bon sens
@@ -53,6 +52,10 @@ const rotation = (i = S.page) => S.doc?.rotations.get(i) || 0;
 const visiblePages = () => (S.doc ? S.doc.order.filter((i) => !S.doc.removed.has(i)) : []);
 const thumbOf = (id) => $("pageList").querySelector(`.thumb[data-id="${id}"]`);
 const isDirty = () => S.past.length !== S.cleanAt;
+/** Retouche en vigueur sur une zone de texte : la derniere qui la vise. Lue dans les
+    operations elles-memes, elle suit sans table a tenir a jour les copies de page et
+    l'historique. */
+const editOf = (page, itemId) => S.doc.ops.findLast((o) => o.page === page && o.itemId === itemId) || null;
 const isSheet = () => !WIDE.matches && !SHORT.matches;
 const point = () => (FINE.matches ? "Cliquez" : "Touchez");
 
@@ -187,7 +190,7 @@ async function openFile(file) {
     const doc = await PdfDoc.open(file);
     Object.assign(S, {
       doc, page: 0, zoom: 1, analysis: null, sel: null, draft: null,
-      edits: new Map(), past: [], future: [], cleanAt: 0, turn: new Map(),
+      past: [], future: [], cleanAt: 0, turn: new Map(),
     });
     document.body.classList.remove("is-welcome");
     $("drop").hidden = true;
@@ -388,7 +391,7 @@ function selectItem(item, el) {
   S.sel = item; S.draft = null;
   // Une zone deja retouchee se rouvre avec les reglages de sa retouche, pas avec les
   // mesures d'origine : sinon appliquer de nouveau les effacerait.
-  const op = S.edits.get(item.id);
+  const op = editOf(S.page, item.id);
   fillEditor(item, op ? { ...item, text: op.text, size: op.size, color: op.color, fontKey: op.fontKey,
     bold: op.bold, italic: op.italic, align: op.align } : item);
   revealAboveSheet(el);
@@ -538,7 +541,7 @@ async function applyEdit({ close = false } = {}) {
     align: currentAlign(),
   };
 
-  const prev = !isNew ? S.edits.get(base.id) : base.replacing || null;
+  const prev = !isNew ? editOf(S.page, base.id) : base.replacing || null;
   // Rien de change : on ne fabrique pas de retouche, qui re-dessinerait le texte a
   // l'identique et laisserait une trace dans l'historique.
   const ref = prev || base;
@@ -563,12 +566,10 @@ async function applyEdit({ close = false } = {}) {
   S.busy = true;
   $("applyBtn").disabled = $("doneBtn").disabled = true;
   try {
-    if (prev && isNew) S.doc.replaceOp(prev, op);
-    else {
-      if (prev) S.doc.removeOp(prev.uid);
-      S.doc.addOp(op);
-    }
-    if (!isNew) S.edits.set(base.id, op);
+    // Une nouvelle version prend la place de l'ancienne : l'ordre de superposition ne
+    // change pas, et Annuler le rend tel quel.
+    if (prev) S.doc.replaceOp(prev, op);
+    else S.doc.addOp(op);
     record({ type: "op", page: S.page, op, replaced: prev || null, itemId: isNew ? null : base.id, prevText: base.text });
     if (!isNew) base.text = op.text;
     await refreshCurrent();
@@ -628,10 +629,6 @@ async function travel(from, to, forward) {
       if (gone && back) S.doc.replaceOp(gone, back);
       else if (back) S.doc.ops.splice(e.index ?? S.doc.ops.length, 0, back);
       else if (gone) S.doc.removeOp(gone.uid);
-      if (e.itemId) {
-        if (forward) S.edits.set(e.itemId, e.op);
-        else e.replaced ? S.edits.set(e.itemId, e.replaced) : S.edits.delete(e.itemId);
-      }
       if (item) item.text = forward ? e.op.text : e.prevText;
       S.busy = false;
       if (e.page !== S.page) await loadPage(e.page);
@@ -645,7 +642,8 @@ async function travel(from, to, forward) {
       S.doc.order = [...(forward ? e.after : e.before)];
       buildThumbs();
       const vis = visiblePages();
-      await loadPage(vis.includes(S.page) ? S.page : vis.includes(e.show) ? e.show : vis[0]);
+      const want = forward ? e.show : e.from;
+      await loadPage(vis.includes(want) ? want : vis.includes(S.page) ? S.page : vis[0]);
     } else if (e.type === "remove") {
       S.busy = false;
       if (forward) await hidePage(e.page);
@@ -676,6 +674,7 @@ function setTool(name) {
   $("hintText").textContent = name === "mark" ? annotate.hintFor() : HINTS[name] || "";
   $("hintAlt").hidden = name !== "sign";
   annotate.show(name === "mark");
+  $("stage").classList.toggle("has-hint", name !== "select");
   $("pager").hidden = name === "mark";
 }
 
@@ -813,7 +812,7 @@ function insertImage(bbox) {
   inp.onchange = async () => {
     const f = inp.files[0];
     if (!f) return;
-    try { await placeBitmap(await createImageBitmap(f), bbox); }
+    try { await placeBitmap(await readImage(f), bbox); }
     catch (e) { console.error(e); toast("Cette image ne peut pas être lue.", true); }
   };
   inp.click();
@@ -941,7 +940,9 @@ function buildThumbs() {
       if (!WIDE.matches) setSidebar(false);
       if (id !== S.page) loadPage(id);
     };
-    d.oncontextmenu = (ev) => { ev.preventDefault(); pageMenu(id, { x: ev.clientX, y: ev.clientY }); };
+    // Chrome sur Android envoie `contextmenu` a l'appui long, pendant qu'on souleve la
+    // miniature pour la glisser : le menu ne doit pas s'ouvrir par-dessus.
+    d.oncontextmenu = (ev) => { ev.preventDefault(); if (!d._gesture) pageMenu(id, { x: ev.clientX, y: ev.clientY }); };
     initThumbDrag(d, id);
     list.appendChild(d);
     thumbObserver.observe(d);
@@ -998,6 +999,7 @@ function initThumbDrag(el, id) {
     el.style.transform = "";
     list.querySelectorAll(".drop-before,.drop-after").forEach((t) => t.classList.remove("drop-before", "drop-after"));
     pid = null; lifted = dragging = false;
+    el._gesture = false;
   };
   const target = (y) => {
     const others = [...list.querySelectorAll(".thumb:not([hidden])")].filter((t) => t !== el);
@@ -1023,6 +1025,7 @@ function initThumbDrag(el, id) {
   el.addEventListener("pointerdown", (e) => {
     if (e.target.closest(".more") || (e.pointerType === "mouse" && e.button !== 0) || pid !== null) return;
     pid = e.pointerId; startX = e.clientX; startY = lastY = e.clientY;
+    el._gesture = e.pointerType !== "mouse";
     if (e.pointerType !== "mouse") {
       timer = setTimeout(() => { lifted = true; navigator.vibrate?.(8); el.classList.add("lifted"); }, 420);
     }
@@ -1112,10 +1115,11 @@ function pickFile(accept, then) {
 /** Modification de la liste des pages (ajout, copie, deplacement), reversible : l'ordre
     d'avant et d'apres est garde dans l'historique. `fn` retourne la page a afficher. */
 async function changePages(fn, show) {
-  const before = [...S.doc.order];
+  const before = [...S.doc.order], from = S.page;
   const res = await fn();
   const target = show ?? (Array.isArray(res) ? res[0] : res);
-  record({ type: "pages", before, after: [...S.doc.order], show: target });
+  if (before.join() === S.doc.order.join()) return;
+  record({ type: "pages", before, after: [...S.doc.order], show: target, from });
   buildThumbs();
   updateTitle();
   if (target !== undefined && target !== S.page) await loadPage(target);
@@ -1123,20 +1127,34 @@ async function changePages(fn, show) {
 }
 
 async function insertPdf(file) {
+  if (S.busy) return;
   veil(true, "Ajout des pages…");
+  S.busy = true;
   try {
     let ids = [];
     await changePages(async () => (ids = await S.doc.insertPdf(file, visiblePages().at(-1))));
     toast(`${plural(ids.length, "page")} ajoutée${ids.length > 1 ? "s" : ""}`);
   } catch (e) {
     console.error(e); toast("Ce PDF ne peut pas être ajouté : " + e.message, true);
-  } finally { veil(false); }
+  } finally { S.busy = false; veil(false); }
+}
+
+/** Image d'un fichier, ramenee a une definition raisonnable : une photo d'iPhone decodee
+    pese pres de 50 Mo, et la WebView ferme l'app au-dela de quelques-unes. 2 400 px sur
+    le grand cote restent nets imprimes en pleine page. */
+async function readImage(file, maxSide = 2400) {
+  const full = await createImageBitmap(file);
+  const k = maxSide / Math.max(full.width, full.height);
+  if (k >= 1) return full;
+  const small = await createImageBitmap(full, { resizeWidth: Math.round(full.width * k), resizeHeight: Math.round(full.height * k), resizeQuality: "high" });
+  full.close();
+  return small;
 }
 
 /** Photo (ou document photographie) en nouvelle page A4, dans le sens de l'image. */
 async function insertPhotoPage(file) {
   try {
-    const bitmap = await createImageBitmap(file);
+    const bitmap = await readImage(file);
     const portrait = bitmap.height >= bitmap.width;
     const size = portrait ? { width: 595.28, height: 841.89 } : { width: 841.89, height: 595.28 };
     const m = 18, k = Math.min((size.width - 2 * m) / bitmap.width, (size.height - 2 * m) / bitmap.height);
@@ -1221,6 +1239,7 @@ async function exportPdf({ only = null } = {}) {
   if (!S.doc || S.busy) return;
   veil(true, "Préparation du PDF…", 0);
   let file;
+  S.busy = true;
   try {
     const bytes = await S.doc.export((p) => veil(true, "Préparation du PDF…", p), { only });
     const base = S.doc.name.replace(/\.pdf$/i, "");
@@ -1232,7 +1251,7 @@ async function exportPdf({ only = null } = {}) {
     console.error(e);
     veil(false);
     return toast("L’export a échoué : " + e.message, true);
-  }
+  } finally { S.busy = false; }
   veil(false);
   // Une page exportee seule n'enregistre pas le document : il reste « modifie ».
   const saved = () => { if (!only) { S.cleanAt = S.past.length; updateTitle(); } };
@@ -1320,7 +1339,7 @@ function initGestures() {
   // n'ont lieu qu'une fois, au lacher. Les deux doigts deplacent aussi la page, comme
   // dans Photos.
   const frame = $("frame");
-  let startMid = null, lastMid = null, ratio = 1, fx = 0, fy = 0;
+  let startMid = null, lastMid = null, ratio = 1, fx = 0, fy = 0, sx = 0, sy = 0;
   wrap.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 2 || !S.doc || pinching) return;
     pinching = true;
@@ -1330,6 +1349,10 @@ function initGestures() {
     ratio = 1;
     const r = frame.getBoundingClientRect();
     fx = (startMid.x - r.left) / r.width; fy = (startMid.y - r.top) / r.height;
+    // Sur iPhone, un premier doigt a pu lancer le defilement avant que le second se pose :
+    // on le fige, et l'ecart deja parcouru est compense dans la transformation.
+    sx = wrap.scrollLeft; sy = wrap.scrollTop;
+    wrap.style.overflow = "hidden";
     frame.style.transformOrigin = `${startMid.x - r.left}px ${startMid.y - r.top}px`;
     frame.style.willChange = "transform";
     $("objBar").hidden = true;
@@ -1341,7 +1364,8 @@ function initGestures() {
     if (e.touches.length !== 2) return;
     lastMid = mid(e.touches);
     ratio = Math.max(MIN_ZOOM / startZoom, Math.min(MAX_ZOOM / startZoom, dist(e.touches) / startDist));
-    frame.style.transform = `translate(${lastMid.x - startMid.x}px, ${lastMid.y - startMid.y}px) scale(${ratio})`;
+    const dx = lastMid.x - startMid.x + (wrap.scrollLeft - sx), dy = lastMid.y - startMid.y + (wrap.scrollTop - sy);
+    frame.style.transform = `translate(${dx}px, ${dy}px) scale(${ratio})`;
   }, { passive: false });
   const endPinch = (e) => {
     if (!pinching || e.touches.length >= 2) return;
@@ -1352,6 +1376,7 @@ function initGestures() {
     // Le point de la page qui etait sous les doigts au depart finit la ou ils sont : c'est
     // la que la transformation l'affichait.
     frame.style.transform = frame.style.transformOrigin = frame.style.willChange = "";
+    wrap.style.overflow = "";
     S.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, startZoom * ratio));
     layout();
     const after = frame.getBoundingClientRect();
@@ -1463,7 +1488,7 @@ function initShortcuts() {
       return;
     }
     if (mod && k === "o") { e.preventDefault(); return $("picker").click(); }
-    if (!S.doc) return;
+    if (!S.doc || S.busy) return;
 
     if (mod && e.key === "Enter") { e.preventDefault(); return applyEdit(); }
     // Dans un champ, Cmd+Z annule la saisie : c'est le comportement natif attendu.
@@ -1521,6 +1546,16 @@ function boot() {
   $("zoomLabel").onclick = () => zoomCentered(1);
   $("prevPage").onclick = () => stepPage(-1);
   $("nextPage").onclick = () => stepPage(1);
+  // Les objets poses passent avant le texte quand le toucher tombe sur eux (leur trait,
+  // leurs lignes) : la phase de capture les sert avant les zones de texte.
+  $("overlay").addEventListener("click", (e) => {
+    if (S.tool !== "select" || swallowNextClick || !S.doc) return;
+    const p = toLocal(e.clientX, e.clientY), k = scale();
+    const op = objects.hitTest({ x: p.x / k, y: p.y / k }, 10 / k);
+    if (!op) return;
+    e.stopPropagation();
+    objects.select(op, { x: p.x / k, y: p.y / k });
+  }, true);
   $("overlay").onclick = () => {
     if (swallowNextClick) { swallowNextClick = false; return; }
     clearSelection();

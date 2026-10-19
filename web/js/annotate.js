@@ -79,6 +79,10 @@ function buildBar() {
     `<button type="button" class="mk-kind" data-kind="${k.kind}" aria-pressed="false" aria-label="${k.label}" title="${k.label}">` +
     `<svg class="sym"><use href="#${k.icon}"/></svg></button>`).join("");
   kinds.querySelectorAll(".mk-kind").forEach((b) => (b.onclick = () => setKind(b.dataset.kind)));
+  // Le fondu du bord droit signale les outils hors de vue ; il disparait au bout.
+  const edge = () => kinds.classList.toggle("at-end", kinds.scrollLeft + kinds.clientWidth >= kinds.scrollWidth - 2);
+  kinds.addEventListener("scroll", edge, { passive: true });
+  requestAnimationFrame(edge);
   $("mkWidth").onclick = () => {
     const i = WIDTHS.findIndex(([w]) => w === state.width);
     state.width = WIDTHS[(i + 1) % WIDTHS.length][0];
@@ -118,7 +122,7 @@ function setKind(kind) {
 
 export function show(on) {
   $("markBar").hidden = !on;
-  if (on) syncBar();
+  if (on) { syncBar(); $("mkKinds").dispatchEvent(new Event("scroll")); }
   if (!on) clearLive();
 }
 

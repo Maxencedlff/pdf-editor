@@ -326,10 +326,12 @@ export class PdfDoc {
   findItem(idx, id) { return (this.analysis.get(idx)?.items || []).find((i) => i.id === id) || null; }
 
   /** Applique les operations d'une page sur un canvas deja rendu.
-      `rect` est la region couverte par le canvas, en points ; `scale` le facteur px/pt. */
-  applyOps(idx, ctx, canvas, rect, scale) {
-    const ops = this.opsFor(idx);
-    if (!ops.length) return;
+      `rect` est la region couverte par le canvas, en points ; `scale` le facteur px/pt.
+      Les annotations forment une couche au-dessus des retouches, comme dans un lecteur
+      PDF : corriger une ligne surlignee ne doit pas effacer le surlignage dans le fond. */
+  applyOps(idx, ctx, canvas, rect, scale, list = this.opsFor(idx)) {
+    if (!list.length) return;
+    const ops = [...list.filter((o) => o.type !== "mark"), ...list.filter((o) => o.type === "mark")];
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const toPx = (r) => [
       (r[0] - rect[0]) * scale, (r[1] - rect[1]) * scale,
@@ -396,42 +398,37 @@ export class PdfDoc {
 
   /* ------------------------------------------------------------- export */
   /** Reconstruit le PDF : seules les zones modifiees sont reincrustees, a la resolution
-      du scan. Le reste de la page n'est ni decode ni reencode. */
+      du scan. Le reste de la page n'est ni decode ni reencode.
+
+      L'arbre des pages est refait dans l'ordre voulu en reutilisant les pages du fichier
+      ouvert : les recopier ecrirait chaque page deux fois. Seules une page dupliquee et
+      les pages d'un PDF ajoute sont recopiees. */
   async export(onProgress, { only = null } = {}) {
     const { PDFDocument, degrees, StandardFonts, rgb } = PDFLib;
     const out = await PDFDocument.load(this.bytes.slice(), { ignoreEncryption: true });
     const helv = await out.embedFont(StandardFonts.Helvetica);
     const ids = (only || this.order).filter((id) => !this.removed.has(id));
 
-    // Pages du document d'origine, dans l'ordre, sans ajout : on garde le fichier tel
-    // quel en retirant seulement les pages supprimees (signets et formulaires survivent).
-    // Sinon les pages sont recopiees dans le nouvel ordre.
-    const original = [...out.getPages()];
-    const untouched = ids.every((id, i) => {
+    const original = out.getPages();
+    const parsed = new Map([[0, out]]);
+    const sourceDoc = async (src) => {
+      if (!parsed.has(src)) parsed.set(src, await PDFDocument.load(this.sources[src].bytes.slice(), { ignoreEncryption: true }));
+      return parsed.get(src);
+    };
+    // Les copies se font avant de vider l'arbre : copyPages lit les pages par leur rang.
+    const used = new Set(), pages = [];
+    for (const id of ids) {
       const slot = this.slots.get(id);
-      return slot.src === 0 && slot.index === id && (i === 0 || id > ids[i - 1]);
-    });
-    let pages;
-    if (untouched) {
-      const keep = new Set(ids);
-      for (let i = original.length - 1; i >= 0; i--) if (!keep.has(i)) out.removePage(i);
-      pages = out.getPages();
-    } else {
-      const parsed = new Map();
-      const sourceDoc = async (src) => {
-        if (!parsed.has(src)) parsed.set(src, await PDFDocument.load(this.sources[src].bytes.slice(), { ignoreEncryption: true }));
-        return parsed.get(src);
-      };
-      pages = [];
-      for (const id of ids) {
-        const slot = this.slots.get(id);
-        if (slot.blank) { pages.push(out.addPage([slot.blank.width, slot.blank.height])); continue; }
-        const [copy] = await out.copyPages(await sourceDoc(slot.src), [slot.index]);
-        pages.push(out.addPage(copy));
-      }
-      for (let i = original.length - 1; i >= 0; i--) out.removePage(i);
+      if (slot.blank) { pages.push(slot.blank); continue; }
+      if (slot.src === 0 && !used.has(slot.index)) { used.add(slot.index); pages.push(original[slot.index]); continue; }
+      pages.push((await out.copyPages(await sourceDoc(slot.src), [slot.index]))[0]);
+    }
+    for (let i = original.length - 1; i >= 0; i--) out.removePage(i);
+    for (let n = 0; n < pages.length; n++) {
+      pages[n] = pages[n].width ? out.addPage([pages[n].width, pages[n].height]) : out.addPage(pages[n]);
     }
 
+    const embedded = new Map();
     for (let n = 0; n < ids.length; n++) {
       const idx = ids[n], page = pages[n];
       // La rotation s'applique avant le tri des pages sans retouche : une page simplement
@@ -441,19 +438,32 @@ export class PdfDoc {
       const ops = this.opsFor(idx);
       if (!ops.length) continue;
       if (onProgress) onProgress(n / ids.length);
-      const { width: pw, height: ph } = page.getSize();
+      const { width: pw, height: ph } = await this.pageSize(idx);
       const dpi = await this.detectNativeDpi(idx);
 
-      for (let i = 0; i < ops.length; i++) {
-        const op = ops[i];
-        if (op.type === "mark") { marks.exportTo(page, op, ph); continue; }
+      // Les retouches sont mesurees sur la page telle que pdf.js l'affiche (rotation
+      // d'origine appliquee, coin haut gauche du cadre visible). On dessine donc dans ce
+      // repere, retourne pour pdf-lib qui compte les y depuis le bas.
+      page.pushOperators(PDFLib.pushGraphicsState(), PDFLib.concatTransformationMatrix(...(await this.viewToUser(idx, ph))));
+
+      const pixelOps = ops.filter((o) => o.type !== "mark");
+      for (let i = 0; i < pixelOps.length; i++) {
+        const op = pixelOps[i];
+        // Une image se pose telle quelle, sans etre rasterisee avec le fond : elle garde
+        // sa definition et son format (JPEG pour une photo).
+        if (op.type === "image" && op.bitmap) {
+          if (!embedded.has(op.bitmap)) embedded.set(op.bitmap, await embedBitmap(out, op.bitmap, !op.signature));
+          const b = op.bbox;
+          page.drawImage(embedded.get(op.bitmap), { x: b[0], y: ph - b[3], width: b[2] - b[0], height: b[3] - b[1] });
+          continue;
+        }
         const rect = this.patchRect(op, idx, pw, ph);
         if (!rect) continue;
         const canvas = await this.renderRegion(idx, rect, dpi, false);
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         // La zone reprend aussi les retouches precedentes qu'elle chevauche : sinon elle
         // les recouvrirait avec le contenu d'origine de la page.
-        this.applyOpsSubset(idx, ops.slice(0, i + 1), ctx, canvas, rect, dpi / 72);
+        this.applyOps(idx, ctx, canvas, rect, dpi / 72, pixelOps.slice(0, i + 1));
         const png = await out.embedPng(await blobBytes(canvas));
         page.drawImage(png, {
           x: rect[0], y: ph - rect[3], width: rect[2] - rect[0], height: rect[3] - rect[1],
@@ -468,15 +478,27 @@ export class PdfDoc {
           } catch (_) { /* caractere hors WinAnsi */ }
         }
       }
+      // Les annotations en dernier, en vectoriel, au-dessus de toutes les retouches.
+      for (const op of ops) if (op.type === "mark") marks.exportTo(page, op, ph);
+      page.pushOperators(PDFLib.popGraphicsState());
     }
     return out.save();
   }
 
-  applyOpsSubset(idx, ops, ctx, canvas, rect, scale) {
-    const saved = this.ops;
-    this.ops = ops;
-    try { this.applyOps(idx, ctx, canvas, rect, scale); }
-    finally { this.ops = saved; }
+  /** Matrice qui ramene le repere d'affichage (en points, y vers le haut, hauteur `h`)
+      dans l'espace utilisateur de la page : inverse de la transformation de pdf.js. */
+  async viewToUser(idx, h) {
+    const page = await this.pdfPage(idx);
+    const [a, b, c, d, e, f] = page ? page.getViewport({ scale: 1 }).transform : [1, 0, 0, -1, 0, h];
+    const det = a * d - b * c;
+    const inv = [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
+    // D'abord y -> h - y (retour au repere d'affichage), puis l'inverse.
+    const flip = [1, 0, 0, -1, 0, h];
+    return [
+      inv[0] * flip[0] + inv[2] * flip[1], inv[1] * flip[0] + inv[3] * flip[1],
+      inv[0] * flip[2] + inv[2] * flip[3], inv[1] * flip[2] + inv[3] * flip[3],
+      inv[0] * flip[4] + inv[2] * flip[5] + inv[4], inv[1] * flip[4] + inv[3] * flip[5] + inv[5],
+    ];
   }
 
   /** Zone a reincruster : elle doit couvrir le texte saisi, souvent plus long que celui
@@ -523,8 +545,20 @@ function hashSeed(str) {
   return (h >>> 0) || 1;
 }
 
-function blobBytes(canvas) {
+/** Image posee dans le PDF : JPEG pour une photo, PNG pour garder la transparence
+    d'une signature. */
+async function embedBitmap(out, bitmap, opaque) {
+  const c = canvasOf(bitmap.width, bitmap.height);
+  const ctx = c.getContext("2d");
+  if (opaque) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
+  ctx.drawImage(bitmap, 0, 0);
+  const type = opaque ? "image/jpeg" : "image/png";
+  const bytes = await blobBytes(c, type);
+  return opaque ? out.embedJpg(bytes) : out.embedPng(bytes);
+}
+
+function blobBytes(canvas, type = "image/png") {
   return new Promise((resolve) => {
-    canvas.toBlob(async (b) => resolve(new Uint8Array(await b.arrayBuffer())), "image/png");
+    canvas.toBlob(async (b) => resolve(new Uint8Array(await b.arrayBuffer())), type, 0.9);
   });
 }

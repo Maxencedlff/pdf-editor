@@ -14,6 +14,7 @@ const MIN_SIZE = 6;          // points : en dessous, l'objet ne se saisit plus
 
 let api = null;              // fourni par ui.js : voir init()
 let selected = null;         // operation selectionnee
+let tapAt = null;            // point touche a la selection, en points
 
 export const isObject = (op) => op.type === "image" || op.type === "mark" || op.type === "add";
 
@@ -39,7 +40,59 @@ function moved(op, dx, dy) {
   return marks.translated(op, dx, dy);
 }
 
-/** Elements de l'overlay pour les objets de la page, au-dessus des zones de texte. */
+/* ---------------------------------------------------------------- toucher */
+
+const dist = (p, x0, y0, x1, y1) => {
+  const dx = x1 - x0, dy = y1 - y0, l = dx * dx + dy * dy;
+  const t = l ? Math.max(0, Math.min(1, ((p.x - x0) * dx + (p.y - y0) * dy) / l)) : 0;
+  return Math.hypot(p.x - (x0 + t * dx), p.y - (y0 + t * dy));
+};
+const inside = (p, b, m = 0) => p.x >= b[0] - m && p.x <= b[2] + m && p.y >= b[1] - m && p.y <= b[3] + m;
+
+/** L'objet est-il sous le point `p` ? Une forme ne se saisit que par son trait, un
+    surlignage que sur ses lignes : le texte qu'ils entourent reste touchable. `tol` est
+    la marge de tolerance, en points. */
+function touches(op, p, tol) {
+  if (op.type !== "mark") return inside(p, op.bbox, tol / 2);
+  const w = (op.width || 1) / 2 + tol;
+  switch (op.kind) {
+    case "highlight": case "underline": case "strike":
+      return op.rects.some((r) => inside(p, r, tol / 3));
+    case "check": case "cross":
+      return inside(p, op.box, tol / 2);
+    case "rect": {
+      const [x0, y0, x1, y1] = op.box;
+      return inside(p, op.box, w) && !inside(p, [x0 + w, y0 + w, x1 - w, y1 - w]);
+    }
+    case "ellipse": {
+      const [x0, y0, x1, y1] = op.box;
+      const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
+      const n = Math.hypot((p.x - x0 - rx) / rx, (p.y - y0 - ry) / ry);
+      return Math.abs(n - 1) * Math.min(rx, ry) <= w;
+    }
+    case "line": case "arrow":
+      return dist(p, ...op.p) <= w + (op.kind === "arrow" ? 2 : 0);
+    case "ink":
+      return op.strokes.some((st) => st.length === 1 ? Math.hypot(p.x - st[0][0], p.y - st[0][1]) <= w
+        : st.some((q, i) => i > 0 && dist(p, st[i - 1][0], st[i - 1][1], q[0], q[1]) <= w));
+  }
+  return false;
+}
+
+/** Objet sous le point `p` de la page, le plus petit s'il y en a plusieurs ; `null` sinon. */
+export function hitTest(p, tol) {
+  let best = null, bestArea = Infinity;
+  for (const op of api.ops()) {
+    if (!isObject(op) || !touches(op, p, tol)) continue;
+    const b = boxOf(op), area = (b[2] - b[0]) * (b[3] - b[1]);
+    if (area <= bestArea) { best = op; bestArea = area; }
+  }
+  return best;
+}
+
+/** Elements de l'overlay pour les objets de la page, au-dessus des zones de texte. Ils
+    ne recoivent pas les touchers, sauf l'objet selectionne (pour le glisser) : la
+    selection passe par hitTest, plus precis qu'un cadre. */
 export function render(overlay) {
   const { width: W, height: H } = api.size();
   if (selected && !api.ops().includes(selected)) selected = null;
@@ -55,11 +108,6 @@ export function render(overlay) {
     el.setAttribute("aria-label", labelOf(op));
     el.tabIndex = 0;
     if (op === selected) decorate(el);
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (api.tool() !== "select" || api.swallowing()) return;
-      select(op);
-    });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(op); }
     });
@@ -75,9 +123,10 @@ function labelOf(op) {
     rect: "Rectangle", ellipse: "Ellipse", arrow: "Flèche", line: "Trait", check: "Coche", cross: "Croix" }[op.kind];
 }
 
-export function select(op) {
+export function select(op, p = null) {
   api.clearText();
   selected = op;
+  tapAt = p;
   api.rerender();
 }
 
@@ -107,12 +156,15 @@ function decorate(el) {
       el.appendChild(h);
     }
   }
-  if (!textual) el.addEventListener("pointerdown", (e) => startDrag(e, el, e.target.dataset.corner || null));
+  // L'element survit a une deselection (Echap) : l'ecouteur verifie que son objet est
+  // toujours celui qui est selectionne.
+  const op = selected;
+  if (!textual) el.addEventListener("pointerdown", (e) => { if (selected === op) startDrag(e, el, op, e.target.dataset.corner || null); });
 }
 
-function startDrag(e, el, corner) {
+function startDrag(e, el, op, corner) {
   if (e.pointerType === "mouse" && e.button !== 0) return;
-  const op = selected, from = boxOf(op), k = api.scale();
+  const from = boxOf(op), k = api.scale();
   const start = api.toLocal(e.clientX, e.clientY);
   const keepRatio = op.type === "image" || ["check", "cross"].includes(op.kind);
   const { width: W, height: H } = api.size();
@@ -195,7 +247,8 @@ function placeBar() {
   });
   act("edit", () => api.editAdded(op));
   act("text", () => {
-    const r = op.rects[0];
+    // La ligne touchee, pas forcement la premiere du surlignage.
+    const r = (tapAt && op.rects.find((q) => inside(tapAt, q, 2))) || op.rects[0];
     deselect();
     api.editTextAt({ x: (r[0] + r[2]) / 2, y: (r[1] + r[3]) / 2 });
   });
