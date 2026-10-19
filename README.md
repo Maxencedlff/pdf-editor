@@ -30,9 +30,13 @@ bien mais porte l'icone generique des fichiers de commande.
 | **Texte** | Clic sur un texte de la page, modification, application |
 | **Gomme** | Efface une zone en reconstituant le fond |
 | **Ajouter** | Nouveau bloc de texte n'importe ou |
-| **Image** | Insere une image ou une signature |
+| **Annoter** | Surligner, souligner, barrer (cale sur les lignes de texte), crayon, rectangle, ellipse, fleche, trait, coche, croix, date du jour. Exporte en vectoriel : le texte du dessous reste net et selectionnable |
+| **Signer** | Signature dessinee au doigt, memorisee sur l'appareil, posee d'un toucher |
+| **Image** | Insere une image |
+| Objets | Avec l'outil Texte, toucher une image, signature, annotation ou texte ajoute : deplacer, redimensionner par les coins, couleur, dupliquer, supprimer |
 | **Relire** | Inspecteur, section « Cette page » (ou menu de la miniature) : relit la page dans l'autre mode (OCR ou texte natif). Version locale |
-| Miniatures | Menu (clic droit, appui long ou bouton ⋯) : pivoter a gauche ou a droite, supprimer la page |
+| Miniatures | Menu (clic droit, appui long ou bouton ⋯) : pivoter, monter, descendre, dupliquer, inserer une page blanche, exporter la page seule, supprimer. Glisser une miniature la deplace (au doigt : appui long puis glisser) |
+| Ajouter des pages | Bas du panneau des pages : page blanche, pages d'un autre PDF, photo ou numerisation en page A4 |
 | Exporter | Bouton de partage : telechargement a la souris, feuille de partage du systeme au doigt |
 
 Interface dans l'esprit des applications Apple, commune aux deux versions (`web/app.css`

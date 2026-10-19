@@ -1,9 +1,15 @@
 /* Modele de document dans le navigateur : rendu (pdf.js), analyse, edition, export
-   (pdf-lib). Toutes les coordonnees stockees sont en points PDF (1/72 pouce). */
+   (pdf-lib). Toutes les coordonnees stockees sont en points PDF (1/72 pouce).
+
+   Pages : chaque page a un identifiant stable, qui sert de cle aux retouches, rotations
+   et analyses. Une page vient d'un PDF source (le document ouvert ou un PDF ajoute) ou
+   est blanche ; `order` donne l'ordre affiche et exporte. Les pages du document ouvert
+   gardent leur indice d'origine comme identifiant. */
 
 import * as fonts from "./fonts.js";
 import * as img from "./imaging.js";
 import { ocrLines } from "./ocr.js";
+import * as marks from "./marks.js";
 
 const PATCH_MARGIN_PT = 2.5;
 const MAX_PATCH_DPI = 320;
@@ -24,6 +30,11 @@ export class PdfDoc {
     this.name = name;
     this.bytes = bytes;
     this.pdf = pdf;
+    this.sources = [{ bytes, pdf }];
+    this.slots = new Map();
+    for (let i = 0; i < pdf.numPages; i++) this.slots.set(i, { src: 0, index: i });
+    this.order = [...this.slots.keys()];
+    this.nextId = pdf.numPages;
     this.ops = [];
     this.analysis = new Map();
     this.rotations = new Map();
@@ -32,21 +43,74 @@ export class PdfDoc {
   }
 
   static async open(file) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const pdf = await pdfjsLib.getDocument({
-      data: bytes.slice(),
-      standardFontDataUrl: "vendor/pdfjs/standard_fonts/",
-      isEvalSupported: false,
-    }).promise;
+    const { bytes, pdf } = await load(file);
     return new PdfDoc(file.name || "document.pdf", bytes, pdf);
   }
 
-  get pageCount() { return this.pdf.numPages; }
+  /** Page pdf.js d'un identifiant ; `null` pour une page blanche. */
+  async pdfPage(id) {
+    const slot = this.slots.get(id);
+    if (!slot || slot.blank) return null;
+    return this.sources[slot.src].pdf.getPage(slot.index + 1);
+  }
 
   async pageSize(idx) {
-    const page = await this.pdf.getPage(idx + 1);
+    const slot = this.slots.get(idx);
+    if (slot?.blank) return { ...slot.blank };
+    const page = await this.pdfPage(idx);
     const v = page.getViewport({ scale: 1 });
     return { width: v.width, height: v.height };
+  }
+
+  /* ------------------------------------------------------------- pages */
+  /** Page blanche placee apres `afterId`, de la taille donnee. */
+  insertBlank(afterId, size) {
+    const id = this.nextId++;
+    this.slots.set(id, { blank: { width: size.width, height: size.height } });
+    this.order.splice(this.order.indexOf(afterId) + 1, 0, id);
+    return id;
+  }
+
+  /** Copie d'une page avec ses retouches et sa rotation, placee juste apres elle. */
+  duplicate(id) {
+    const copy = this.nextId++;
+    this.slots.set(copy, { ...this.slots.get(id) });
+    if (this.rotations.has(id)) this.rotations.set(copy, this.rotations.get(id));
+    if (this.nativeDpi.has(id)) this.nativeDpi.set(copy, this.nativeDpi.get(id));
+    // L'analyse est recopiee avec des zones renommees : une zone appartient a une page.
+    const rename = (itemId) => itemId && itemId.replace(/^p\d+-/, `p${copy}-`);
+    const a = this.analysis.get(id);
+    if (a) {
+      const clone = JSON.parse(JSON.stringify(a));
+      clone.index = copy;
+      clone.items.forEach((it) => (it.id = rename(it.id)));
+      this.analysis.set(copy, clone);
+    }
+    for (const op of this.opsFor(id)) {
+      this.addOp({ ...op, uid: undefined, page: copy, itemId: rename(op.itemId) });
+    }
+    this.order.splice(this.order.indexOf(id) + 1, 0, copy);
+    return copy;
+  }
+
+  /** Ajoute les pages d'un autre PDF apres `afterId`. Retourne leurs identifiants. */
+  async insertPdf(file, afterId) {
+    const { bytes, pdf } = await load(file);
+    const src = this.sources.push({ bytes, pdf }) - 1;
+    const ids = [];
+    for (let i = 0; i < pdf.numPages; i++) {
+      const id = this.nextId++;
+      this.slots.set(id, { src, index: i });
+      ids.push(id);
+    }
+    this.order.splice(this.order.indexOf(afterId) + 1, 0, ...ids);
+    return ids;
+  }
+
+  /** Deplace une page a la position `pos` de l'ordre. */
+  movePage(id, pos) {
+    this.order.splice(this.order.indexOf(id), 1);
+    this.order.splice(Math.max(0, Math.min(this.order.length, pos)), 0, id);
   }
 
   /** Resolution reelle de la plus grande image de la page.
@@ -56,7 +120,8 @@ export class PdfDoc {
     if (this.nativeDpi.has(idx)) return this.nativeDpi.get(idx);
     let dpi = 200;
     try {
-      const page = await this.pdf.getPage(idx + 1);
+      const page = await this.pdfPage(idx);
+      if (!page) throw new Error("page blanche");
       const v = page.getViewport({ scale: 1 });
       const ops = await page.getOperatorList();
       let widest = 0;
@@ -74,18 +139,19 @@ export class PdfDoc {
 
   /** Rend une region de page (en points) dans un canvas, a la resolution demandee. */
   async renderRegion(idx, rect, dpi, withOps = false) {
-    const page = await this.pdf.getPage(idx + 1);
+    const page = await this.pdfPage(idx);
     const scale = dpi / 72;
-    const viewport = page.getViewport({ scale });
     const c = canvasOf((rect[2] - rect[0]) * scale, (rect[3] - rect[1]) * scale);
     const ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, c.width, c.height);
-    await page.render({
-      canvasContext: ctx,
-      viewport,
-      transform: [1, 0, 0, 1, -rect[0] * scale, -rect[1] * scale],
-    }).promise;
+    if (page) {
+      await page.render({
+        canvasContext: ctx,
+        viewport: page.getViewport({ scale }),
+        transform: [1, 0, 0, 1, -rect[0] * scale, -rect[1] * scale],
+      }).promise;
+    }
     if (withOps) this.applyOps(idx, ctx, c, rect, scale);
     return c;
   }
@@ -98,8 +164,13 @@ export class PdfDoc {
   /* ------------------------------------------------------------- analyse */
   async analyze(idx, { force = null, onProgress = null } = {}) {
     if (!force && this.analysis.has(idx)) return this.analysis.get(idx);
-    const page = await this.pdf.getPage(idx + 1);
+    const page = await this.pdfPage(idx);
     const size = await this.pageSize(idx);
+    if (!page) {
+      const res = { index: idx, mode: "native", items: [], width: size.width, height: size.height, dpi: 150 };
+      this.analysis.set(idx, res);
+      return res;
+    }
     const dpi = Math.min(MAX_PATCH_DPI, Math.max(200, await this.detectNativeDpi(idx)));
 
     let boxes = [];
@@ -242,6 +313,14 @@ export class PdfDoc {
     return op.uid;
   }
   undo() { return this.ops.pop() || null; }
+  /** Remplace une operation a sa place : l'ordre compte, une retouche posee apres une
+      autre la recouvre. */
+  replaceOp(old, op) {
+    if (!op.uid) op.uid = nextUid();
+    const i = this.ops.indexOf(old);
+    if (i < 0) this.ops.push(op); else this.ops[i] = op;
+    return op;
+  }
   removeOp(uid) { this.ops = this.ops.filter((o) => o.uid !== uid); }
   opsFor(idx) { return this.ops.filter((o) => o.page === idx); }
   findItem(idx, id) { return (this.analysis.get(idx)?.items || []).find((i) => i.id === id) || null; }
@@ -263,12 +342,17 @@ export class PdfDoc {
         img.erase(pixels, toPx(op.bbox), seed);
         continue;
       }
-      if (op.type === "image" && op.bitmap) {
+      // Images et annotations se dessinent avec le canvas, pas pixel par pixel : on
+      // repasse par lui le temps de les poser.
+      if ((op.type === "image" && op.bitmap) || op.type === "mark") {
         ctx.putImageData(pixels, 0, 0);
-        const b = toPx(op.bbox);
-        ctx.drawImage(op.bitmap, b[0], b[1], b[2] - b[0], b[3] - b[1]);
-        const fresh = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        pixels.data.set(fresh.data);
+        if (op.type === "image") {
+          const b = toPx(op.bbox);
+          ctx.drawImage(op.bitmap, b[0], b[1], b[2] - b[0], b[3] - b[1]);
+        } else {
+          marks.draw(ctx, op, (x) => (x - rect[0]) * scale, (y) => (y - rect[1]) * scale, scale);
+        }
+        pixels.data.set(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
         continue;
       }
 
@@ -313,30 +397,63 @@ export class PdfDoc {
   /* ------------------------------------------------------------- export */
   /** Reconstruit le PDF : seules les zones modifiees sont reincrustees, a la resolution
       du scan. Le reste de la page n'est ni decode ni reencode. */
-  async export(onProgress) {
+  async export(onProgress, { only = null } = {}) {
     const { PDFDocument, degrees, StandardFonts, rgb } = PDFLib;
     const out = await PDFDocument.load(this.bytes.slice(), { ignoreEncryption: true });
     const helv = await out.embedFont(StandardFonts.Helvetica);
+    const ids = (only || this.order).filter((id) => !this.removed.has(id));
 
-    const pages = out.getPages();
-    for (let idx = 0; idx < pages.length; idx++) {
+    // Pages du document d'origine, dans l'ordre, sans ajout : on garde le fichier tel
+    // quel en retirant seulement les pages supprimees (signets et formulaires survivent).
+    // Sinon les pages sont recopiees dans le nouvel ordre.
+    const original = [...out.getPages()];
+    const untouched = ids.every((id, i) => {
+      const slot = this.slots.get(id);
+      return slot.src === 0 && slot.index === id && (i === 0 || id > ids[i - 1]);
+    });
+    let pages;
+    if (untouched) {
+      const keep = new Set(ids);
+      for (let i = original.length - 1; i >= 0; i--) if (!keep.has(i)) out.removePage(i);
+      pages = out.getPages();
+    } else {
+      const parsed = new Map();
+      const sourceDoc = async (src) => {
+        if (!parsed.has(src)) parsed.set(src, await PDFDocument.load(this.sources[src].bytes.slice(), { ignoreEncryption: true }));
+        return parsed.get(src);
+      };
+      pages = [];
+      for (const id of ids) {
+        const slot = this.slots.get(id);
+        if (slot.blank) { pages.push(out.addPage([slot.blank.width, slot.blank.height])); continue; }
+        const [copy] = await out.copyPages(await sourceDoc(slot.src), [slot.index]);
+        pages.push(out.addPage(copy));
+      }
+      for (let i = original.length - 1; i >= 0; i--) out.removePage(i);
+    }
+
+    for (let n = 0; n < ids.length; n++) {
+      const idx = ids[n], page = pages[n];
       // La rotation s'applique avant le tri des pages sans retouche : une page simplement
       // pivotee doit l'etre aussi dans le fichier exporte.
       const rot = this.rotations.get(idx) || 0;
-      if (rot) pages[idx].setRotation(degrees((pages[idx].getRotation().angle + rot) % 360));
+      if (rot) page.setRotation(degrees((page.getRotation().angle + rot) % 360));
       const ops = this.opsFor(idx);
       if (!ops.length) continue;
-      if (onProgress) onProgress(idx / pages.length);
-      const page = pages[idx];
+      if (onProgress) onProgress(n / ids.length);
       const { width: pw, height: ph } = page.getSize();
       const dpi = await this.detectNativeDpi(idx);
 
-      for (const op of ops) {
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        if (op.type === "mark") { marks.exportTo(page, op, ph); continue; }
         const rect = this.patchRect(op, idx, pw, ph);
         if (!rect) continue;
         const canvas = await this.renderRegion(idx, rect, dpi, false);
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        this.applyOpsSubset(idx, [op], ctx, canvas, rect, dpi / 72);
+        // La zone reprend aussi les retouches precedentes qu'elle chevauche : sinon elle
+        // les recouvrirait avec le contenu d'origine de la page.
+        this.applyOpsSubset(idx, ops.slice(0, i + 1), ctx, canvas, rect, dpi / 72);
         const png = await out.embedPng(await blobBytes(canvas));
         page.drawImage(png, {
           x: rect[0], y: ph - rect[3], width: rect[2] - rect[0], height: rect[3] - rect[1],
@@ -351,10 +468,6 @@ export class PdfDoc {
           } catch (_) { /* caractere hors WinAnsi */ }
         }
       }
-    }
-
-    for (const idx of [...this.removed].sort((a, b) => b - a)) {
-      if (out.getPageCount() > 1) out.removePage(idx);
     }
     return out.save();
   }
@@ -390,6 +503,16 @@ export class PdfDoc {
       Math.min(pw, x1 + m), Math.min(ph, y1 + m),
     ];
   }
+}
+
+async function load(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjsLib.getDocument({
+    data: bytes.slice(),
+    standardFontDataUrl: "vendor/pdfjs/standard_fonts/",
+    isEvalSupported: false,
+  }).promise;
+  return { bytes, pdf };
 }
 
 const sanitize = (s) => (s || "").replace(/[^\x20-\x7E -ÿ]/g, "?");
