@@ -1601,6 +1601,9 @@ function boot() {
   initGestures();
   // Safari zoomerait toute l'interface sur un pincement hors de la page (barres, feuille).
   for (const t of ["gesturestart", "gesturechange"]) document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+  // Un pincement commence hors de la page (barres, feuille, bord de l'ecran) ne doit pas
+  // zoomer l'interface : Safari ignore user-scalable=no.
+  document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
   initSheetDrag();
   initKeyboardInset();
   native.onOpenDocument(openFile);
