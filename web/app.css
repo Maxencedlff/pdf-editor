@@ -59,7 +59,8 @@
 /* Les regles de mise en page ci-dessous (display:grid/flex) l'emportent sur le style par
    defaut de [hidden] : sans ce rappel, un element masque resterait cliquable. */
 [hidden]{display:none!important}
-html{height:100%;background:var(--stage)}
+/* manipulation : pas de zoom au double-tap (sur les boutons + et - notamment) */
+html{height:100%;background:var(--stage);touch-action:manipulation}
 body{
   margin:0;min-height:100%;background:var(--stage);color:var(--label);
   font:var(--fs)/1.35 var(--font);letter-spacing:-.01em;
