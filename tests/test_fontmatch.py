@@ -1,5 +1,5 @@
 """Verifie que la police d'un texte scanne est bien retrouvee (bruit + JPEG inclus)."""
-import io, sys, random
+import io, sys
 sys.path.insert(0, "/mnt/c/Users/maxde/pdf-editor")
 import numpy as np
 from PIL import Image, ImageDraw

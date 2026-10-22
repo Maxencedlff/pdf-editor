@@ -537,7 +537,7 @@ async function load(file) {
   return { bytes, pdf };
 }
 
-const sanitize = (s) => (s || "").replace(/[^\x20-\x7E -ÿ]/g, "?");
+const sanitize = (s) => (s || "").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
 
 function hashSeed(str) {
   let h = 2166136261;

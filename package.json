@@ -5,7 +5,9 @@
   "description": "Éditeur PDF : version web (web/, Vercel) et app iOS (Capacitor, ios/)",
   "scripts": {
     "web:build": "node scripts/build-web.mjs",
-    "ios:sync": "npm run web:build && cap sync ios"
+    "ios:sync": "npm run web:build && cap sync ios",
+    "lint": "eslint .",
+    "test": "node --test tests/web/"
   },
   "engines": {
     "node": ">=22"
@@ -19,6 +21,12 @@
     "@capacitor/splash-screen": "^8.0.2"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.3"
+    "@capacitor/cli": "^8.5.3",
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

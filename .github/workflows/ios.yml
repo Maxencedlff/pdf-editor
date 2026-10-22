@@ -41,6 +41,9 @@ jobs:
       - name: Dépendances
         run: npm ci
 
+      - name: Analyse statique et tests unitaires
+        run: npm run lint && npm test
+
       - name: Contenu web et synchronisation iOS
         run: npm run web:build && npx cap sync ios
 

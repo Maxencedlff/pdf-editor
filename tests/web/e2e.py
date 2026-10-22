@@ -5,7 +5,7 @@ releve a l'audit du 19/10/2026. Lancer depuis la racine du depot :
 
 Le script sert web/ sur un port libre, fabrique ses PDF de test avec PyMuPDF et rend
 un code d'erreur si un scenario echoue."""
-import asyncio, http.server, io, os, socketserver, sys, tempfile, threading
+import asyncio, http.server, os, socketserver, sys, tempfile, threading
 import fitz
 from playwright.async_api import async_playwright
 

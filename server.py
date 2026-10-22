@@ -4,14 +4,13 @@ Rien ne sort de la machine : les documents restent en memoire et sur le disque l
 """
 from __future__ import annotations
 
-import io
 
 import uuid
 from pathlib import Path
 
 import fitz
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from pdfcore import fonts, ocr

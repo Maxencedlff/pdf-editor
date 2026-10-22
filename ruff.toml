@@ -1,0 +1,6 @@
+# Analyse du Python (version locale, moteur, tests) : erreurs de syntaxe et Pyflakes (noms inconnus,
+# imports inutiles...) : les vraies erreurs, pas le style compact du depot.
+extend-exclude = ["ios", "dist", "node_modules", "web/vendor"]
+
+[lint]
+select = ["E9", "F"]
