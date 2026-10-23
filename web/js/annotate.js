@@ -56,7 +56,6 @@ function savePrefs() {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(state)); } catch (_) { /* sans importance */ }
 }
 
-export const currentKind = () => state.kind;
 export const hintFor = (kind = state.kind) => ({
   highlight: "Glissez sur le texte à surligner.",
   underline: "Glissez sur le texte à souligner.",

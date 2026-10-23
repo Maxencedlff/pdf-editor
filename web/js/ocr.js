@@ -3,10 +3,6 @@
 const MIN_CONF = 35;
 let workerPromise = null;
 
-export function ocrReady() {
-  return workerPromise !== null;
-}
-
 /** Le worker est cree une seule fois : son initialisation telecharge le moteur et les
     donnees de langue, ce qui pese quelques megaoctets. */
 export function getWorker(onProgress) {
